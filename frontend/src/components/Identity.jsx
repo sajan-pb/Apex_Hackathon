@@ -1,510 +1,736 @@
 import { useState } from "react";
+import { ethers } from "ethers";
 
-function Identity({
-  walletAddress,
-  isConnected,
-  addActivity,
-}) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [identities, setIdentities] = useState([]);
+import { getSigner, getProvider } from "../blockchain/provider";
+import {
+  IdentityRegistryABI,
+} from "../blockchain/contracts";
 
-  const [verifyId, setVerifyId] = useState("");
-  const [verificationResult, setVerificationResult] =
+import {
+  CONTRACT_ADDRESSES,
+} from "../blockchain/addresses";
+
+
+function Identity({ walletAddress, isConnected }) {
+
+  const [identityAddress, setIdentityAddress] =
+    useState("");
+
+  const [cid, setCid] =
+    useState("");
+
+  const [documentText, setDocumentText] =
+    useState("");
+
+  const [status, setStatus] =
+    useState("");
+
+  const [isLoading, setIsLoading] =
+    useState(false);
+
+  const [identityResult, setIdentityResult] =
     useState(null);
 
-  const [message, setMessage] = useState("");
 
-  const registerIdentity = (e) => {
-    e.preventDefault();
+  // ==========================================
+  // GET CONTRACT WITH SIGNER
+  // ==========================================
 
-    if (!isConnected) {
-      setMessage(
-        "❌ Please connect your MetaMask wallet first."
-      );
-      return;
-    }
+  const getIdentityContract = async () => {
 
-    if (!name.trim() || !email.trim()) {
-      setMessage("❌ Please fill in all fields.");
-      return;
-    }
+    const signer =
+      await getSigner();
 
-    const newIdentityId = `ID-${Date.now()
-      .toString()
-      .slice(-8)}`;
-
-    const newIdentity = {
-      id: newIdentityId,
-      name: name.trim(),
-      email: email.trim(),
-      wallet: walletAddress,
-      status: "Active",
-      createdAt: new Date().toLocaleString(),
-    };
-
-    setIdentities((previousIdentities) => [
-      ...previousIdentities,
-      newIdentity,
-    ]);
-
-    if (addActivity) {
-      addActivity(
-        "Identity",
-        `New identity registered: ${newIdentity.name} (${newIdentityId})`
-      );
-    }
-
-    setMessage(
-      `✅ Identity registered successfully! Identity ID: ${newIdentityId}`
+    return new ethers.Contract(
+      CONTRACT_ADDRESSES.IdentityRegistry,
+      IdentityRegistryABI,
+      signer
     );
-
-    setName("");
-    setEmail("");
-    setVerificationResult(null);
   };
 
-  const verifyIdentity = (e) => {
-    e.preventDefault();
 
-    if (!verifyId.trim()) {
-      setVerificationResult({
-        type: "error",
-        message: "Please enter an Identity ID.",
+  // ==========================================
+  // ISSUE IDENTITY
+  // ==========================================
+
+  const issueIdentity = async () => {
+
+    try {
+
+      if (!isConnected) {
+
+        setStatus(
+          "❌ Please connect your wallet first."
+        );
+
+        return;
+      }
+
+
+      if (
+        !ethers.isAddress(identityAddress)
+      ) {
+
+        setStatus(
+          "❌ Please enter a valid wallet address."
+        );
+
+        return;
+      }
+
+
+      if (!cid.trim()) {
+
+        setStatus(
+          "❌ Please enter a Document CID."
+        );
+
+        return;
+      }
+
+
+      if (!documentText.trim()) {
+
+        setStatus(
+          "❌ Please enter document content."
+        );
+
+        return;
+      }
+
+
+      setIsLoading(true);
+
+      setStatus(
+        "⏳ Preparing blockchain transaction..."
+      );
+
+
+      const contract =
+        await getIdentityContract();
+
+
+      // CREATE DOCUMENT HASH
+
+      const documentBytes =
+        ethers.toUtf8Bytes(
+          documentText
+        );
+
+
+      const documentHash =
+        ethers.keccak256(
+          documentBytes
+        );
+
+
+      setStatus(
+        "⏳ Sending transaction to MetaMask..."
+      );
+
+
+      const transaction =
+        await contract.issueIdentity(
+          identityAddress,
+          cid,
+          documentHash
+        );
+
+
+      setStatus(
+        "⏳ Transaction sent. Waiting for confirmation..."
+      );
+
+
+      await transaction.wait();
+
+
+      setStatus(
+        "✅ Identity successfully issued on blockchain!"
+      );
+
+
+      setIdentityResult({
+        address:
+          identityAddress,
+
+        cid:
+          cid,
+
+        documentHash:
+          documentHash,
+
+        transactionHash:
+          transaction.hash,
       });
 
-      return;
+
+    } catch (error) {
+
+      console.error(error);
+
+
+      setStatus(
+        `❌ ${
+          error.reason ||
+          error.shortMessage ||
+          error.message
+        }`
+      );
+
+    } finally {
+
+      setIsLoading(false);
+
     }
 
-    const foundIdentity = identities.find(
-      (identity) =>
-        identity.id.toLowerCase() ===
-        verifyId.trim().toLowerCase()
-    );
+  };
 
-    if (foundIdentity) {
-      setVerificationResult({
-        type: "success",
-        identity: foundIdentity,
-      });
 
-      if (addActivity) {
-        addActivity(
-          "Identity",
-          `Identity verified successfully: ${foundIdentity.name} (${foundIdentity.id})`
+  // ==========================================
+  // CHECK IDENTITY
+  // ==========================================
+
+  const checkIdentity = async () => {
+
+    try {
+
+      if (
+        !ethers.isAddress(identityAddress)
+      ) {
+
+        setStatus(
+          "❌ Enter a valid wallet address first."
         );
-      }
-    } else {
-      setVerificationResult({
-        type: "error",
-        message:
-          "Identity not found in the local registry.",
-      });
 
-      if (addActivity) {
-        addActivity(
-          "Identity",
-          `Identity verification failed for ID: ${verifyId.trim()}`
-        );
+        return;
+
       }
+
+
+      setIsLoading(true);
+
+
+      const provider =
+        getProvider();
+
+
+      const contract =
+        new ethers.Contract(
+          CONTRACT_ADDRESSES.IdentityRegistry,
+          IdentityRegistryABI,
+          provider
+        );
+
+
+      const tokenId =
+        await contract.identityOf(
+          identityAddress
+        );
+
+
+      const valid =
+        await contract.hasValidIdentity(
+          identityAddress
+        );
+
+
+      if (tokenId === 0n) {
+
+        setStatus(
+          "❌ No identity found for this wallet."
+        );
+
+        setIdentityResult(null);
+
+      } else {
+
+        setStatus(
+          valid
+            ? "✅ Valid identity found!"
+            : "⚠️ Identity exists but has been revoked."
+        );
+
+
+        setIdentityResult({
+
+          address:
+            identityAddress,
+
+          tokenId:
+            tokenId.toString(),
+
+          valid:
+
+            valid
+              ? "Valid"
+              : "Revoked",
+
+        });
+
+      }
+
+
+    } catch (error) {
+
+      console.error(error);
+
+
+      setStatus(
+        `❌ ${
+          error.shortMessage ||
+          error.message
+        }`
+      );
+
+    } finally {
+
+      setIsLoading(false);
+
     }
+
   };
 
-  const inputStyle = {
-    width: "100%",
-    background: "rgba(255, 255, 255, 0.05)",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
-    borderRadius: "8px",
-    padding: "12px 16px",
-    color: "white",
-    fontSize: "1rem",
-    outline: "none",
-    boxSizing: "border-box",
+
+  // ==========================================
+  // REVOKE IDENTITY
+  // ==========================================
+
+  const revokeIdentity = async () => {
+
+    try {
+
+      if (!identityResult?.tokenId) {
+
+        setStatus(
+          "❌ Check an identity first."
+        );
+
+        return;
+
+      }
+
+
+      setIsLoading(true);
+
+
+      setStatus(
+        "⏳ Sending revoke transaction..."
+      );
+
+
+      const contract =
+        await getIdentityContract();
+
+
+      const transaction =
+        await contract.revokeIdentity(
+          identityResult.tokenId
+        );
+
+
+      await transaction.wait();
+
+
+      setStatus(
+        "✅ Identity revoked successfully!"
+      );
+
+
+      setIdentityResult({
+        ...identityResult,
+
+        valid:
+          "Revoked",
+
+        transactionHash:
+          transaction.hash,
+
+      });
+
+
+    } catch (error) {
+
+      console.error(error);
+
+
+      setStatus(
+        `❌ ${
+          error.reason ||
+          error.shortMessage ||
+          error.message
+        }`
+      );
+
+    } finally {
+
+      setIsLoading(false);
+
+    }
+
   };
+
 
   return (
-    <div>
-      <div
-        className="section-title"
-        style={{ marginBottom: "2rem" }}
-      >
-        <h2>Identity Management</h2>
+
+    <section className="dashboard">
+
+
+      <div className="section-title">
+
+        <h2>
+          Decentralized Identity
+        </h2>
 
         <p>
-          Register, verify and manage
-          blockchain-based digital identities.
+          Issue, verify and revoke
+          blockchain-based identities.
         </p>
+
       </div>
 
-      {isConnected ? (
-        <div
-          className="wallet-status"
-          style={{ marginBottom: "2rem" }}
-        >
-          <strong>🟢 Wallet Connected</strong>
 
-          <p
-            style={{
-              marginTop: "0.5rem",
-              wordBreak: "break-all",
-            }}
-          >
-            {walletAddress}
-          </p>
-        </div>
-      ) : (
-        <div
-          className="wallet-status"
-          style={{
-            marginBottom: "2rem",
-            background: "rgba(239, 68, 68, 0.1)",
-            borderColor: "#ef4444",
-          }}
-        >
-          <strong style={{ color: "#fca5a5" }}>
-            ⚠️ Wallet Not Connected
-          </strong>
+      {/* WALLET STATUS */}
 
-          <p
-            style={{
-              marginTop: "0.5rem",
-              color: "#fca5a5",
-            }}
-          >
-            Connect your MetaMask wallet to manage
-            digital identities.
-          </p>
-        </div>
-      )}
-
-      {message && (
-        <div
-          className="wallet-status"
-          style={{
-            marginBottom: "2rem",
-            position: "relative",
-          }}
-        >
-          <p>{message}</p>
-
-          <button
-            onClick={() => setMessage("")}
-            style={{
-              position: "absolute",
-              top: "8px",
-              right: "10px",
-              background: "transparent",
-              border: "none",
-              color: "white",
-              cursor: "pointer",
-              fontSize: "1rem",
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: "2rem",
-          alignItems: "start",
-        }}
-      >
-        {/* REGISTER */}
-        <div
-          className="service-card"
-          style={{ padding: "2.5rem" }}
-        >
-          <div className="card-icon">🪪</div>
-
-          <h3>Register New Identity</h3>
-
-          <p
-            style={{
-              color: "var(--text-muted)",
-              marginBottom: "1.5rem",
-            }}
-          >
-            Create a new digital identity linked to
-            your wallet.
-          </p>
-
-          {!isConnected ? (
-            <p style={{ color: "#fca5a5" }}>
-              ⚠️ Please connect your MetaMask wallet
-              first.
-            </p>
-          ) : (
-            <form
-              onSubmit={registerIdentity}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "1rem",
-              }}
-            >
-              <input
-                type="text"
-                placeholder="Full Name"
-                value={name}
-                onChange={(e) =>
-                  setName(e.target.value)
-                }
-                style={inputStyle}
-              />
-
-              <input
-                type="email"
-                placeholder="Email Address"
-                value={email}
-                onChange={(e) =>
-                  setEmail(e.target.value)
-                }
-                style={inputStyle}
-              />
-
-              <button
-                type="submit"
-                className="hero-button"
-                style={{
-                  marginTop: "1rem",
-                  width: "100%",
-                }}
-              >
-                Register Identity →
-              </button>
-            </form>
-          )}
-        </div>
-
-        {/* VERIFY */}
-        <div
-          className="service-card"
-          style={{ padding: "2.5rem" }}
-        >
-          <div className="card-icon">🔍</div>
-
-          <h3>Verify Identity</h3>
-
-          <p
-            style={{
-              color: "var(--text-muted)",
-              marginBottom: "1.5rem",
-            }}
-          >
-            Enter an Identity ID to verify its
-            registration status.
-          </p>
-
-          <form
-            onSubmit={verifyIdentity}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "1rem",
-            }}
-          >
-            <input
-              type="text"
-              placeholder="Enter Identity ID"
-              value={verifyId}
-              onChange={(e) =>
-                setVerifyId(e.target.value)
-              }
-              style={inputStyle}
-            />
-
-            <button
-              type="submit"
-              className="card-btn"
-              style={{ width: "100%" }}
-            >
-              Verify Identity →
-            </button>
-          </form>
-
-          {verificationResult && (
-            <div
-              style={{
-                marginTop: "1.5rem",
-                padding: "1rem",
-                borderRadius: "8px",
-                background:
-                  verificationResult.type ===
-                  "success"
-                    ? "rgba(34, 197, 94, 0.1)"
-                    : "rgba(239, 68, 68, 0.1)",
-                border:
-                  verificationResult.type ===
-                  "success"
-                    ? "1px solid #22c55e"
-                    : "1px solid #ef4444",
-              }}
-            >
-              {verificationResult.type ===
-              "success" ? (
-                <>
-                  <h4>✅ Identity Verified</h4>
-
-                  <p>
-                    <strong>Name:</strong>{" "}
-                    {
-                      verificationResult.identity
-                        .name
-                    }
-                  </p>
-
-                  <p>
-                    <strong>Email:</strong>{" "}
-                    {
-                      verificationResult.identity
-                        .email
-                    }
-                  </p>
-
-                  <p>
-                    <strong>Status:</strong> 🟢 Active
-                  </p>
-                </>
-              ) : (
-                <p>
-                  ❌ {verificationResult.message}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* IDENTITIES */}
       <div
         className="service-card"
         style={{
-          padding: "2.5rem",
-          marginTop: "2rem",
+          marginBottom: "2rem",
         }}
       >
-        <div className="card-icon">📋</div>
 
-        <h3>Registered Identities</h3>
+        <h3>
+          👛 Connected Wallet
+        </h3>
 
-        <p
-          style={{
-            color: "var(--text-muted)",
-            marginBottom: "1.5rem",
-          }}
-        >
-          Identities registered during this session.
+
+        <p>
+
+          {isConnected
+            ? walletAddress
+            : "Wallet not connected"}
+
         </p>
 
-        {identities.length === 0 ? (
-          <div
-            style={{
-              padding: "1.5rem",
-              textAlign: "center",
-              color: "var(--text-muted)",
-            }}
-          >
-            No identities registered yet.
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(250px, 1fr))",
-              gap: "1rem",
-            }}
-          >
-            {identities.map((identity) => (
-              <div
-                key={identity.id}
-                style={{
-                  background:
-                    "rgba(255,255,255,0.03)",
-                  padding: "1.2rem",
-                  borderRadius: "10px",
-                  border:
-                    "1px solid rgba(255,255,255,0.1)",
-                }}
-              >
-                <p
-                  style={{
-                    color: "var(--accent-cyan)",
-                    fontWeight: "bold",
-                  }}
-                >
-                  {identity.id}
-                </p>
-
-                <p>
-                  <strong>👤 Name:</strong>{" "}
-                  {identity.name}
-                </p>
-
-                <p>
-                  <strong>📧 Email:</strong>{" "}
-                  {identity.email}
-                </p>
-
-                <p>
-                  <strong>Status:</strong> 🟢{" "}
-                  {identity.status}
-                </p>
-
-                <p
-                  style={{
-                    fontSize: "0.8rem",
-                    color: "var(--text-muted)",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  Wallet:
-                  <br />
-                  {identity.wallet}
-                </p>
-
-                <p
-                  style={{
-                    fontSize: "0.75rem",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  Created:
-                  <br />
-                  {identity.createdAt}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
+
+
+      {/* ISSUE IDENTITY */}
 
       <div
-        className="wallet-status"
-        style={{ marginTop: "2rem" }}
+        className="service-card"
+        style={{
+          marginBottom: "2rem",
+        }}
       >
-        <strong>⛓️ Blockchain Integration Status</strong>
 
-        <p
+        <div className="card-icon">
+          🪪
+        </div>
+
+
+        <h3>
+          Issue Identity
+        </h3>
+
+
+        <p>
+          Create a permanent decentralized
+          identity on the blockchain.
+        </p>
+
+
+        <input
+          className="transaction-input"
+
+          placeholder="Wallet Address"
+
+          value={identityAddress}
+
+          onChange={(event) =>
+            setIdentityAddress(
+              event.target.value
+            )
+          }
+        />
+
+
+        <input
+          className="transaction-input"
+
+          placeholder="Document CID (example: ipfs://...)"
+
+          value={cid}
+
+          onChange={(event) =>
+            setCid(
+              event.target.value
+            )
+          }
+        />
+
+
+        <textarea
+          className="transaction-input"
+
+          placeholder="Document Content"
+
+          value={documentText}
+
+          onChange={(event) =>
+            setDocumentText(
+              event.target.value
+            )
+          }
+
+          rows="4"
+        />
+
+
+        <button
+          className="card-btn"
+
+          onClick={issueIdentity}
+
+          disabled={isLoading}
+        >
+
+          {isLoading
+            ? "Processing..."
+            : "Issue Identity on Blockchain"}
+
+        </button>
+
+      </div>
+
+
+      {/* CHECK IDENTITY */}
+
+      <div
+        className="service-card"
+        style={{
+          marginBottom: "2rem",
+        }}
+      >
+
+        <div className="card-icon">
+          🔍
+        </div>
+
+
+        <h3>
+          Verify Identity
+        </h3>
+
+
+        <p>
+          Check whether a wallet has
+          a valid blockchain identity.
+        </p>
+
+
+        <button
+          className="card-btn"
+
+          onClick={checkIdentity}
+
+          disabled={isLoading}
+        >
+
+          Check Identity
+
+        </button>
+
+      </div>
+
+
+      {/* REVOKE */}
+
+      <div
+        className="service-card"
+        style={{
+          marginBottom: "2rem",
+        }}
+      >
+
+        <div className="card-icon">
+          🚫
+        </div>
+
+
+        <h3>
+          Revoke Identity
+        </h3>
+
+
+        <p>
+          Revoke the selected
+          blockchain identity.
+        </p>
+
+
+        <button
+          className="card-btn"
+
+          onClick={revokeIdentity}
+
+          disabled={
+            isLoading ||
+            !identityResult?.tokenId
+          }
+        >
+
+          Revoke Identity
+
+        </button>
+
+      </div>
+
+
+      {/* STATUS */}
+
+      {status && (
+
+        <div
+          className="service-card"
           style={{
-            marginTop: "0.5rem",
-            color: "var(--text-muted)",
+            marginBottom: "2rem",
           }}
         >
-          Identity registration and verification
-          events are connected to the platform Audit
-          Trail. Smart contract integration can later
-          connect this module to the
-          IdentityRegistry contract.
-        </p>
-      </div>
-    </div>
+
+          <h3>
+            Blockchain Status
+          </h3>
+
+          <p>
+            {status}
+          </p>
+
+        </div>
+
+      )}
+
+
+      {/* RESULT */}
+
+      {identityResult && (
+
+        <div
+          className="service-card"
+        >
+
+          <h3>
+            Identity Result
+          </h3>
+
+
+          <p>
+
+            <strong>
+              Wallet:
+            </strong>
+
+            <br />
+
+            {identityResult.address}
+
+          </p>
+
+
+          {identityResult.tokenId && (
+
+            <p>
+
+              <strong>
+                Token ID:
+              </strong>
+
+              {" "}
+
+              {identityResult.tokenId}
+
+            </p>
+
+          )}
+
+
+          {identityResult.cid && (
+
+            <p>
+
+              <strong>
+                CID:
+              </strong>
+
+              {" "}
+
+              {identityResult.cid}
+
+            </p>
+
+          )}
+
+
+          {identityResult.documentHash && (
+
+            <p>
+
+              <strong>
+                Document Hash:
+              </strong>
+
+              <br />
+
+              {identityResult.documentHash}
+
+            </p>
+
+          )}
+
+
+          {identityResult.valid && (
+
+            <p>
+
+              <strong>
+                Status:
+              </strong>
+
+              {" "}
+
+              {identityResult.valid}
+
+            </p>
+
+          )}
+
+
+          {identityResult.transactionHash && (
+
+            <p>
+
+              <strong>
+                Transaction:
+              </strong>
+
+              <br />
+
+              {identityResult.transactionHash}
+
+            </p>
+
+          )}
+
+        </div>
+
+      )}
+
+
+    </section>
+
   );
+
 }
+
 
 export default Identity;

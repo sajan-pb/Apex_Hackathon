@@ -1,148 +1,527 @@
 import { useState } from "react";
 import { ethers } from "ethers";
+
+import Navbar from "./components/Navbar.jsx";
+import Identity from "./components/Identity.jsx";
+import DigitalAssets from "./components/DigitalAssets.jsx";
+import AccessControl from "./components/AccessControl.jsx";
+import AuditTrail from "./components/AuditTrail.jsx";
+import SecurityMonitoring from "./components/SecurityMonitoring.jsx";
+import TransactionVerification from "./components/TransactionVerification.jsx";
+import BlockchainExplorer from "./components/BlockchainExplorer.jsx";
+
 import "./App.css";
 
 function App() {
+  const [currentPage, setCurrentPage] = useState("dashboard");
+
   const [walletAddress, setWalletAddress] = useState("");
   const [isConnected, setIsConnected] = useState(false);
+
+  const [activities, setActivities] = useState([
+    {
+      id: 1,
+      type: "System",
+      action: "Blockchain security system initialized",
+      user: "System",
+      time: new Date().toLocaleString(),
+      status: "Success",
+    },
+  ]);
+
+  // ==============================
+  // CONNECT METAMASK
+  // ==============================
 
   const connectWallet = async () => {
     try {
       if (!window.ethereum) {
-        alert("MetaMask is not installed. Please install MetaMask.");
+        alert(
+          "MetaMask is not installed. Please install MetaMask first."
+        );
         return;
       }
 
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = new ethers.BrowserProvider(
+        window.ethereum
+      );
 
-      await provider.send("eth_requestAccounts", []);
+      const accounts = await provider.send(
+        "eth_requestAccounts",
+        []
+      );
 
-      const signer = await provider.getSigner();
-      const address = await signer.getAddress();
+      const address = accounts[0];
 
       setWalletAddress(address);
       setIsConnected(true);
+
+      addActivity(
+        "Wallet",
+        "MetaMask wallet connected successfully",
+        address
+      );
+
     } catch (error) {
-      console.error("Wallet connection failed:", error);
-      alert("Failed to connect wallet.");
+      console.error(error);
+
+      alert("Failed to connect MetaMask wallet.");
     }
   };
 
-  const shortenAddress = (address) => {
-    if (!address) return "";
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  // ==============================
+  // ADD AUDIT ACTIVITY
+  // ==============================
+
+  const addActivity = (
+    type,
+    action,
+    user = walletAddress || "System"
+  ) => {
+    const newActivity = {
+      id: Date.now() + Math.random(),
+      type,
+      action,
+      user,
+      time: new Date().toLocaleString(),
+      status: "Success",
+    };
+
+    setActivities((previousActivities) => [
+      newActivity,
+      ...previousActivities,
+    ]);
   };
 
-  return (
-    <div className="app">
-      {/* Background Glows */}
-      <div className="bg-glow glow-1"></div>
-      <div className="bg-glow glow-2"></div>
+  // ==============================
+  // CLEAR ACTIVITIES
+  // ==============================
 
-      <nav className="navbar">
-        <div className="logo">
-          <span className="logo-icon">🔐</span>
-          <span className="logo-text">Apex Secure Platform</span>
-        </div>
+  const clearActivities = () => {
+    setActivities([]);
+  };
 
-        <button className="wallet-button" onClick={connectWallet}>
-          <span className="status-indicator"></span>
-          {isConnected ? shortenAddress(walletAddress) : "Connect Wallet"}
-        </button>
-      </nav>
+  // ==============================
+  // DASHBOARD
+  // ==============================
 
-      <main>
+  const Dashboard = () => {
+    return (
+      <main className="dashboard">
+
+        {/* HERO */}
+
         <section className="hero">
-          <div className="hero-badge">
-            BLOCKCHAIN SECURITY
-          </div>
 
-          <h1>
-            Secure Identity.
-            <br />
-            Secure Assets.
-            <br />
-            <span className="gradient-text">Secure Access.</span>
-          </h1>
+          <div className="hero-content">
 
-          <p>
-            A blockchain-based platform for identity verification,
-            digital asset management and access control.
-          </p>
+            <div className="hero-badge">
+              ⛓️ Blockchain Security Platform
+            </div>
 
-          {!isConnected && (
-            <button className="hero-button" onClick={connectWallet}>
-              Connect MetaMask
-              <span className="btn-arrow">→</span>
-            </button>
-          )}
-        </section>
+            <h1>
+              Secure Your Digital World With
+              <span> ApexChain</span>
+            </h1>
 
-        <section className="dashboard">
-          <div className="section-title">
-            <h2>Platform Services</h2>
             <p>
-              Manage your blockchain security services from one platform.
+              A blockchain-powered cybersecurity platform
+              for digital identity, asset management,
+              access control, transaction verification
+              and security monitoring.
             </p>
+
+            <div className="hero-buttons">
+
+              <button
+                className="hero-button"
+                onClick={() =>
+                  document
+                    .getElementById("services")
+                    ?.scrollIntoView({
+                      behavior: "smooth",
+                    })
+                }
+              >
+                Explore Services →
+              </button>
+
+              <button
+                className="card-btn"
+                onClick={connectWallet}
+              >
+                {isConnected
+                  ? "🟢 Wallet Connected"
+                  : "Connect Wallet"}
+              </button>
+
+            </div>
+
           </div>
 
-          <div className="card-grid">
-            <div className="service-card">
-              <div className="card-icon">🪪</div>
-              <h3>Identity Management</h3>
-              <p>
-                Register, verify and manage blockchain-based user identities.
-              </p>
-              <button className="card-btn">Manage Identity →</button>
-            </div>
-
-            <div className="service-card">
-              <div className="card-icon">💎</div>
-              <h3>Digital Assets</h3>
-              <p>
-                Create, manage and securely track blockchain-based digital assets.
-              </p>
-              <button className="card-btn">View Assets →</button>
-            </div>
-
-            <div className="service-card">
-              <div className="card-icon">🔐</div>
-              <h3>Access Control</h3>
-              <p>
-                Manage user roles, permissions and blockchain access rights.
-              </p>
-              <button className="card-btn">Manage Access →</button>
-            </div>
-
-            <div className="service-card">
-              <div className="card-icon">📜</div>
-              <h3>Audit Trail</h3>
-              <p>
-                Monitor and verify important blockchain activities and transactions.
-              </p>
-              <button className="card-btn">View Audit Trail →</button>
-            </div>
-          </div>
         </section>
+
+
+        {/* WALLET STATUS */}
 
         {isConnected && (
-          <section className="wallet-status fade-in-up">
-            <div className="ws-header">
-              <span className="status-dot"></span>
-              <strong>Wallet Connected</strong>
-            </div>
-            <p className="ws-address">{walletAddress}</p>
-          </section>
-        )}
-      </main>
 
-      <footer>
-        <p>
-          © 2026 Apex Secure Platform | Blockchain Security System
-        </p>
-      </footer>
+          <div className="wallet-status">
+
+            <strong>
+              🟢 Blockchain Wallet Connected
+            </strong>
+
+            <p>
+              {walletAddress}
+            </p>
+
+          </div>
+
+        )}
+
+
+        {/* PLATFORM SERVICES */}
+
+        <section
+          id="services"
+          className="services-section"
+        >
+
+          <div className="section-title">
+
+            <h2>
+              Platform Services
+            </h2>
+
+            <p>
+              Explore blockchain-powered security tools.
+            </p>
+
+          </div>
+
+
+          <div className="services-grid">
+
+
+            {/* IDENTITY */}
+
+            <div className="service-card">
+
+              <div className="card-icon">
+                🪪
+              </div>
+
+              <h3>
+                Identity Management
+              </h3>
+
+              <p>
+                Register and verify secure
+                blockchain-based digital identities.
+              </p>
+
+              <button
+                className="card-btn"
+                onClick={() =>
+                  setCurrentPage("identity")
+                }
+              >
+                Manage Identity →
+              </button>
+
+            </div>
+
+
+            {/* DIGITAL ASSETS */}
+
+            <div className="service-card">
+
+              <div className="card-icon">
+                💎
+              </div>
+
+              <h3>
+                Digital Asset Vault
+              </h3>
+
+              <p>
+                Create and securely manage
+                blockchain-based digital assets.
+              </p>
+
+              <button
+                className="card-btn"
+                onClick={() =>
+                  setCurrentPage("assets")
+                }
+              >
+                Manage Assets →
+              </button>
+
+            </div>
+
+
+            {/* ACCESS CONTROL */}
+
+            <div className="service-card">
+
+              <div className="card-icon">
+                🔐
+              </div>
+
+              <h3>
+                Access Control
+              </h3>
+
+              <p>
+                Assign roles and manage
+                blockchain access permissions.
+              </p>
+
+              <button
+                className="card-btn"
+                onClick={() =>
+                  setCurrentPage("access")
+                }
+              >
+                Manage Access →
+              </button>
+
+            </div>
+
+
+            {/* TRANSACTION */}
+
+            <div className="service-card">
+
+              <div className="card-icon">
+                🔍
+              </div>
+
+              <h3>
+                Transaction Verification
+              </h3>
+
+              <p>
+                Verify blockchain transaction
+                hashes securely.
+              </p>
+
+              <button
+                className="card-btn"
+                onClick={() =>
+                  setCurrentPage("transaction")
+                }
+              >
+                Verify Transaction →
+              </button>
+
+            </div>
+
+
+            {/* EXPLORER */}
+
+            <div className="service-card">
+
+              <div className="card-icon">
+                ⛓️
+              </div>
+
+              <h3>
+                Blockchain Explorer
+              </h3>
+
+              <p>
+                Search blockchain transactions,
+                wallets and block information.
+              </p>
+
+              <button
+                className="card-btn"
+                onClick={() =>
+                  setCurrentPage("explorer")
+                }
+              >
+                Explore Blockchain →
+              </button>
+
+            </div>
+
+
+            {/* SECURITY */}
+
+            <div className="service-card">
+
+              <div className="card-icon">
+                🛡️
+              </div>
+
+              <h3>
+                Security Monitoring
+              </h3>
+
+              <p>
+                Monitor blockchain security
+                and system protection.
+              </p>
+
+              <button
+                className="card-btn"
+                onClick={() =>
+                  setCurrentPage("security")
+                }
+              >
+                View Security →
+              </button>
+
+            </div>
+
+
+            {/* AUDIT */}
+
+            <div className="service-card">
+
+              <div className="card-icon">
+                📜
+              </div>
+
+              <h3>
+                Audit Trail
+              </h3>
+
+              <p>
+                Monitor and verify important
+                blockchain activities and events.
+              </p>
+
+              <button
+                className="card-btn"
+                onClick={() =>
+                  setCurrentPage("audit")
+                }
+              >
+                View Audit Trail →
+              </button>
+
+            </div>
+
+          </div>
+
+        </section>
+
+      </main>
+    );
+  };
+
+
+  // ==============================
+  // PAGE RENDERING
+  // ==============================
+
+  const renderPage = () => {
+
+    switch (currentPage) {
+
+      case "identity":
+
+        return (
+          <Identity
+            walletAddress={walletAddress}
+            isConnected={isConnected}
+            addActivity={addActivity}
+          />
+        );
+
+
+      case "assets":
+
+        return (
+          <DigitalAssets
+            walletAddress={walletAddress}
+            isConnected={isConnected}
+            addActivity={addActivity}
+          />
+        );
+
+
+      case "access":
+
+        return (
+          <AccessControl
+            walletAddress={walletAddress}
+            isConnected={isConnected}
+            addActivity={addActivity}
+          />
+        );
+
+
+      case "audit":
+
+        return (
+          <AuditTrail
+            walletAddress={walletAddress}
+            isConnected={isConnected}
+            activities={activities}
+            addActivity={addActivity}
+            clearActivities={clearActivities}
+          />
+        );
+
+
+      case "security":
+
+        return (
+          <SecurityMonitoring
+            walletAddress={walletAddress}
+            isConnected={isConnected}
+          />
+        );
+
+
+      case "transaction":
+
+        return (
+          <TransactionVerification
+            setCurrentPage={setCurrentPage}
+          />
+        );
+
+
+      case "explorer":
+
+        return (
+          <BlockchainExplorer
+            setCurrentPage={setCurrentPage}
+          />
+        );
+
+
+      default:
+
+        return <Dashboard />;
+    }
+
+  };
+
+
+  return (
+
+    <div className="app">
+
+      <Navbar
+        isConnected={isConnected}
+        walletAddress={walletAddress}
+        connectWallet={connectWallet}
+        setCurrentPage={setCurrentPage}
+      />
+
+      {renderPage()}
+
     </div>
+
   );
+
 }
 
 export default App;

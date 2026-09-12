@@ -1,0 +1,11 @@
+# Frontend Requirements
+
+Node.js >= 24.21.0
+npm >= 11.19.0
+
+react == 19.3.0
+react-dom == 19.3.0
+bootstrap == 5.3.8
+react-bootstrap == 2.10.10
+ethers == 6.17.0
+parcel == 2.16.4

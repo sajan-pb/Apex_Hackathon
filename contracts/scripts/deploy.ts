@@ -1,15 +1,25 @@
+import { network } from "hardhat";
+
 async function main() {
-  // Confirmed constructors (from Member A's actual contracts):
-  // 1. IdentityRegistry(admin)
-  // 2. AssetNFT(admin, identityRegistryAddress)
-  // 3. MultiSigAdmin(admin0, admin1, admin2)
-  // TimeBoundAccessControl — abstract, inherited only, not deployed separately
+  const { ethers } = await network.connect();
+  const [admin, admin1, admin2, admin3] = await ethers.getSigners();
 
-  // NOTE: This script is not runnable yet — Member A's hardhat.config.ts
-  // does not yet have an ethers/deployment plugin registered.
-  // Ask A to add one before Round 2 deployment work begins.
+  const IdentityRegistry = await ethers.getContractFactory("IdentityRegistry");
+  const identityRegistry = await IdentityRegistry.deploy(admin.address);
+  await identityRegistry.waitForDeployment();
+  const identityRegistryAddress = await identityRegistry.getAddress();
+  console.log("IdentityRegistry deployed to:", identityRegistryAddress);
 
-  console.log("Round 2 deployment plan prepared. Waiting on Member A's Hardhat plugin setup before this can run.");
+  const AssetNFT = await ethers.getContractFactory("AssetNFT");
+  const assetNFT = await AssetNFT.deploy(admin.address, identityRegistryAddress);
+  await assetNFT.waitForDeployment();
+  const assetNFTAddress = await assetNFT.getAddress();
+  console.log("AssetNFT deployed to:", assetNFTAddress);
+
+  const MultiSigAdmin = await ethers.getContractFactory("MultiSigAdmin");
+  const multiSig = await MultiSigAdmin.deploy(admin1.address, admin2.address, admin3.address);
+  await multiSig.waitForDeployment();
+  console.log("MultiSigAdmin deployed to:", await multiSig.getAddress());
 }
 
 main().catch((error) => {

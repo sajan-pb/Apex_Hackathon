@@ -60,6 +60,15 @@ async function main() {
     )
   );
   console.log("Wrote backend/shared/deployed-addresses.json");
+
+  // --- Also copy straight into the frontend, so it never has to be hand-edited ---
+  const frontendOutputDir = path.join(__dirname, "..", "..", "frontend", "src", "blockchain");
+  fs.mkdirSync(frontendOutputDir, { recursive: true });
+  fs.copyFileSync(
+    path.join(outputDir, "deployed-addresses.json"),
+    path.join(frontendOutputDir, "deployed-addresses.json")
+  );
+  console.log("Copied deployed-addresses.json into frontend/src/blockchain/");
 }
 
 main().catch((error) => {

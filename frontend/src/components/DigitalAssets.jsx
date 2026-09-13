@@ -1,468 +1,1002 @@
 import { useState } from "react";
+import { ethers } from "ethers";
+
+import {
+  connectToBlockchain,
+  isCorrectNetwork,
+} from "../blockchain/provider";
+
+import {
+  CONTRACT_ADDRESSES,
+} from "../blockchain/addresses";
+
+import {
+  AssetNFTABI,
+  IdentityRegistryABI,
+} from "../blockchain/contracts";
+
 
 function DigitalAssets({
   walletAddress,
   isConnected,
   addActivity,
 }) {
-  const [assetName, setAssetName] = useState("");
-  const [assetDescription, setAssetDescription] =
+
+  // ==========================================
+  // STATES
+  // ==========================================
+
+  const [recipientAddress, setRecipientAddress] =
     useState("");
 
-  const [assetType, setAssetType] =
-    useState("Document");
+  const [metadataCID, setMetadataCID] =
+    useState("");
 
-  const [assets, setAssets] = useState([]);
-  const [message, setMessage] = useState("");
+  const [isMinting, setIsMinting] =
+    useState(false);
 
-  const createAsset = (e) => {
-    e.preventDefault();
+  const [mintResult, setMintResult] =
+    useState(null);
 
-    if (!isConnected) {
-      setMessage(
-        "❌ Please connect your MetaMask wallet first."
+  const [assetTokenId, setAssetTokenId] =
+    useState("");
+
+  const [assetOwner, setAssetOwner] =
+    useState("");
+
+  const [assetMetadata, setAssetMetadata] =
+    useState(null);
+
+  const [isCheckingAsset, setIsCheckingAsset] =
+    useState(false);
+
+  const [walletBalance, setWalletBalance] =
+    useState(null);
+
+  const [isCheckingBalance, setIsCheckingBalance] =
+    useState(false);
+
+
+  // ==========================================
+  // CONNECT TO CONTRACT
+  // ==========================================
+
+  const getContracts = async () => {
+
+    const connection =
+      await connectToBlockchain();
+
+    const {
+      provider,
+      signer,
+    } = connection;
+
+    const assetContract =
+      new ethers.Contract(
+        CONTRACT_ADDRESSES.AssetNFT,
+        AssetNFTABI,
+        signer
       );
-      return;
-    }
 
-    if (
-      !assetName.trim() ||
-      !assetDescription.trim()
-    ) {
-      setMessage("❌ Please fill in all fields.");
-      return;
-    }
+    const identityContract =
+      new ethers.Contract(
+        CONTRACT_ADDRESSES.IdentityRegistry,
+        IdentityRegistryABI,
+        signer
+      );
 
-    const newAsset = {
-      id: `ASSET-${Date.now()
-        .toString()
-        .slice(-8)}`,
-      name: assetName.trim(),
-      description: assetDescription.trim(),
-      type: assetType,
-      owner: walletAddress,
-      status: "Active",
-      createdAt: new Date().toLocaleString(),
+    return {
+      provider,
+      signer,
+      assetContract,
+      identityContract,
     };
+  };
 
-    setAssets((previousAssets) => [
-      ...previousAssets,
-      newAsset,
-    ]);
 
-    if (addActivity) {
-      addActivity(
-        "Asset",
-        `Created digital asset: ${newAsset.name}`
+  // ==========================================
+  // MINT ASSET
+  // ==========================================
+
+  const mintAsset = async () => {
+
+    try {
+
+      setMintResult(null);
+
+      // ------------------------------
+      // CHECK WALLET
+      // ------------------------------
+
+      if (!isConnected) {
+
+        setMintResult({
+          type: "error",
+
+          message:
+            "Please connect your MetaMask wallet first.",
+        });
+
+        return;
+      }
+
+
+      // ------------------------------
+      // VALIDATE ADDRESS
+      // ------------------------------
+
+      if (
+        !recipientAddress ||
+        !ethers.isAddress(recipientAddress)
+      ) {
+
+        setMintResult({
+          type: "error",
+
+          message:
+            "Please enter a valid recipient wallet address.",
+        });
+
+        return;
+      }
+
+
+      // ------------------------------
+      // VALIDATE METADATA
+      // ------------------------------
+
+      if (!metadataCID.trim()) {
+
+        setMintResult({
+          type: "error",
+
+          message:
+            "Please enter asset metadata or a CID.",
+        });
+
+        return;
+      }
+
+
+      setIsMinting(true);
+
+
+      // ------------------------------
+      // CONNECT
+      // ------------------------------
+
+      const {
+        assetContract,
+        identityContract,
+      } =
+        await getContracts();
+
+
+      // ------------------------------
+      // CHECK NETWORK
+      // ------------------------------
+
+      const correctNetwork =
+        await isCorrectNetwork();
+
+      if (!correctNetwork) {
+
+        throw new Error(
+          "Please switch MetaMask to Hardhat Localhost."
+        );
+
+      }
+
+
+      // ------------------------------
+      // CHECK IDENTITY
+      // ------------------------------
+
+      const hasIdentity =
+        await identityContract.hasValidIdentity(
+          recipientAddress
+        );
+
+      if (!hasIdentity) {
+
+        setMintResult({
+          type: "error",
+
+          message:
+            "Recipient does not have a valid blockchain identity. Assets can only be minted to verified identities.",
+        });
+
+        setIsMinting(false);
+
+        return;
+      }
+
+
+      // ------------------------------
+      // MINT NFT
+      // ------------------------------
+
+      const transaction =
+        await assetContract.mintTo(
+          recipientAddress,
+          metadataCID
+        );
+
+
+      setMintResult({
+        type: "loading",
+
+        message:
+          "Transaction sent. Waiting for blockchain confirmation...",
+
+        transactionHash:
+          transaction.hash,
+      });
+
+
+      // ------------------------------
+      // WAIT FOR BLOCKCHAIN
+      // ------------------------------
+
+      const receipt =
+        await transaction.wait();
+
+
+      // ------------------------------
+      // SUCCESS
+      // ------------------------------
+
+      setMintResult({
+        type: "success",
+
+        message:
+          "Digital asset successfully minted on the blockchain.",
+
+        transactionHash:
+          transaction.hash,
+
+        blockNumber:
+          receipt.blockNumber,
+      });
+
+
+      // ------------------------------
+      // AUDIT TRAIL
+      // ------------------------------
+
+      if (addActivity) {
+
+        addActivity(
+          "Digital Asset",
+
+          `Asset minted to ${recipientAddress}`,
+
+          walletAddress
+        );
+
+      }
+
+
+      // ------------------------------
+      // CLEAR FORM
+      // ------------------------------
+
+      setRecipientAddress("");
+
+      setMetadataCID("");
+
+    } catch (error) {
+
+      console.error(
+        "Mint Asset Error:",
+        error
       );
+
+
+      let errorMessage =
+        "Failed to mint digital asset.";
+
+
+      if (error.reason) {
+
+        errorMessage =
+          error.reason;
+
+      }
+
+
+      if (error.shortMessage) {
+
+        errorMessage =
+          error.shortMessage;
+
+      }
+
+
+      setMintResult({
+        type: "error",
+
+        message:
+          errorMessage,
+      });
+
+    } finally {
+
+      setIsMinting(false);
+
     }
 
-    setMessage(
-      `✅ Digital Asset "${newAsset.name}" created successfully!`
-    );
-
-    setAssetName("");
-    setAssetDescription("");
-    setAssetType("Document");
   };
 
-  const deleteAsset = (assetId, assetName) => {
-    setAssets((previousAssets) =>
-      previousAssets.filter(
-        (asset) => asset.id !== assetId
-      )
-    );
 
-    if (addActivity) {
-      addActivity(
-        "Asset",
-        `Removed digital asset: ${assetName}`
+  // ==========================================
+  // CHECK ASSET
+  // ==========================================
+
+  const checkAsset = async () => {
+
+    try {
+
+      setAssetOwner("");
+
+      setAssetMetadata(null);
+
+
+      if (!assetTokenId) {
+
+        alert(
+          "Please enter an Asset Token ID."
+        );
+
+        return;
+
+      }
+
+
+      if (
+        Number(assetTokenId) <= 0
+      ) {
+
+        alert(
+          "Token ID must be greater than 0."
+        );
+
+        return;
+
+      }
+
+
+      setIsCheckingAsset(true);
+
+
+      const {
+        assetContract,
+      } =
+        await getContracts();
+
+
+      // ------------------------------
+      // GET OWNER
+      // ------------------------------
+
+      const owner =
+        await assetContract.ownerOf(
+          assetTokenId
+        );
+
+
+      // ------------------------------
+      // GET METADATA
+      // ------------------------------
+
+      const asset =
+        await assetContract.assets(
+          assetTokenId
+        );
+
+
+      setAssetOwner(
+        owner
       );
+
+
+      setAssetMetadata({
+        metadataCID:
+          asset.metadataCID,
+
+        mintedAt:
+          new Date(
+            Number(asset.mintedAt) *
+              1000
+          ).toLocaleString(),
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "Check Asset Error:",
+        error
+      );
+
+
+      alert(
+        "Asset not found. Please check the Token ID."
+      );
+
+
+    } finally {
+
+      setIsCheckingAsset(false);
+
     }
 
-    setMessage(
-      `🗑️ Digital Asset "${assetName}" removed successfully.`
-    );
   };
 
-  const inputStyle = {
-    width: "100%",
-    background: "rgba(255, 255, 255, 0.05)",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
-    borderRadius: "8px",
-    padding: "12px 16px",
-    color: "white",
-    fontSize: "1rem",
-    outline: "none",
-    boxSizing: "border-box",
+
+  // ==========================================
+  // CHECK WALLET ASSET BALANCE
+  // ==========================================
+
+  const checkWalletAssets = async () => {
+
+    try {
+
+      if (!isConnected) {
+
+        alert(
+          "Please connect your wallet first."
+        );
+
+        return;
+
+      }
+
+
+      setIsCheckingBalance(true);
+
+
+      const {
+        assetContract,
+      } =
+        await getContracts();
+
+
+      const balance =
+        await assetContract.balanceOf(
+          walletAddress
+        );
+
+
+      setWalletBalance(
+        balance.toString()
+      );
+
+
+    } catch (error) {
+
+      console.error(
+        "Balance Error:",
+        error
+      );
+
+
+      alert(
+        "Failed to check wallet assets."
+      );
+
+
+    } finally {
+
+      setIsCheckingBalance(false);
+
+    }
+
   };
+
+
+  // ==========================================
+  // SHORT ADDRESS
+  // ==========================================
+
+  const shortenAddress = (
+    address
+  ) => {
+
+    if (!address) {
+
+      return "";
+
+    }
+
+
+    return `${address.slice(
+      0,
+      8
+    )}...${address.slice(-6)}`;
+
+  };
+
+
+  // ==========================================
+  // UI
+  // ==========================================
 
   return (
-    <div>
-      <div
-        className="section-title"
-        style={{ marginBottom: "2rem" }}
-      >
-        <h2>Digital Asset Vault</h2>
+
+    <section className="dashboard">
+
+
+      {/* TITLE */}
+
+      <div className="section-title">
+
+        <h2>
+          💎 Digital Asset Vault
+        </h2>
 
         <p>
-          Create, manage and securely track
-          blockchain-based digital assets.
-        </p>
-      </div>
-
-      {isConnected ? (
-        <div
-          className="wallet-status"
-          style={{ marginBottom: "2rem" }}
-        >
-          <strong>🟢 Wallet Connected</strong>
-
-          <p
-            style={{
-              marginTop: "0.5rem",
-              wordBreak: "break-all",
-            }}
-          >
-            {walletAddress}
-          </p>
-        </div>
-      ) : (
-        <div
-          className="wallet-status"
-          style={{
-            marginBottom: "2rem",
-            background: "rgba(239,68,68,0.1)",
-            borderColor: "#ef4444",
-          }}
-        >
-          <strong style={{ color: "#fca5a5" }}>
-            ⚠️ Wallet Not Connected
-          </strong>
-
-          <p
-            style={{
-              marginTop: "0.5rem",
-              color: "#fca5a5",
-            }}
-          >
-            Connect MetaMask before creating
-            blockchain assets.
-          </p>
-        </div>
-      )}
-
-      {message && (
-        <div
-          className="wallet-status"
-          style={{ marginBottom: "2rem" }}
-        >
-          <p>{message}</p>
-
-          <button
-            onClick={() => setMessage("")}
-            style={{
-              marginTop: "0.8rem",
-              background: "transparent",
-              border: "none",
-              color: "white",
-              cursor: "pointer",
-            }}
-          >
-            ✕ Close
-          </button>
-        </div>
-      )}
-
-      {/* CREATE ASSET */}
-      <div
-        className="service-card"
-        style={{
-          padding: "2.5rem",
-          marginBottom: "2rem",
-        }}
-      >
-        <div className="card-icon">💎</div>
-
-        <h3>Create Digital Asset</h3>
-
-        <p
-          style={{
-            color: "var(--text-muted)",
-            marginBottom: "1.5rem",
-          }}
-        >
-          Create a new digital asset linked to your
-          connected wallet.
+          Mint and manage blockchain-based
+          digital assets using the AssetNFT
+          smart contract.
         </p>
 
-        {!isConnected ? (
-          <p style={{ color: "#fca5a5" }}>
-            ⚠️ Connect your wallet to continue.
-          </p>
-        ) : (
-          <form
-            onSubmit={createAsset}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "1rem",
-            }}
-          >
-            <input
-              type="text"
-              placeholder="Asset Name"
-              value={assetName}
-              onChange={(e) =>
-                setAssetName(e.target.value)
-              }
-              style={inputStyle}
-            />
-
-            <textarea
-              placeholder="Asset Description"
-              value={assetDescription}
-              onChange={(e) =>
-                setAssetDescription(e.target.value)
-              }
-              style={{
-                ...inputStyle,
-                minHeight: "120px",
-                resize: "vertical",
-              }}
-            />
-
-            <select
-              value={assetType}
-              onChange={(e) =>
-                setAssetType(e.target.value)
-              }
-              style={inputStyle}
-            >
-              <option value="Document">
-                📄 Document
-              </option>
-
-              <option value="Certificate">
-                📜 Certificate
-              </option>
-
-              <option value="Image">
-                🖼️ Image
-              </option>
-
-              <option value="Token">
-                🪙 Token
-              </option>
-
-              <option value="Other">
-                📦 Other
-              </option>
-            </select>
-
-            <button
-              type="submit"
-              className="hero-button"
-              style={{
-                width: "100%",
-                marginTop: "1rem",
-              }}
-            >
-              Create Asset →
-            </button>
-          </form>
-        )}
       </div>
 
-      {/* STATISTICS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "1rem",
-          marginBottom: "2rem",
-        }}
-      >
-        <div
-          className="service-card"
-          style={{ padding: "1.5rem" }}
-        >
-          <h3>{assets.length}</h3>
-          <p>Total Assets</p>
-        </div>
 
-        <div
-          className="service-card"
-          style={{ padding: "1.5rem" }}
-        >
-          <h3>
-            {
-              assets.filter(
-                (asset) =>
-                  asset.status === "Active"
-              ).length
-            }
-          </h3>
-
-          <p>Active Assets</p>
-        </div>
-
-        <div
-          className="service-card"
-          style={{ padding: "1.5rem" }}
-        >
-          <h3>🟢</h3>
-          <p>Vault Active</p>
-        </div>
-      </div>
-
-      {/* ASSET LIST */}
-      <div
-        className="service-card"
-        style={{ padding: "2.5rem" }}
-      >
-        <div className="card-icon">📦</div>
-
-        <h3>Your Digital Assets</h3>
-
-        <p
-          style={{
-            color: "var(--text-muted)",
-            marginBottom: "1.5rem",
-          }}
-        >
-          Assets created during this session.
-        </p>
-
-        {assets.length === 0 ? (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "2rem",
-              color: "var(--text-muted)",
-            }}
-          >
-            <p style={{ fontSize: "2rem" }}>📭</p>
-            <p>No digital assets created yet.</p>
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: "1rem",
-            }}
-          >
-            {assets.map((asset) => (
-              <div
-                key={asset.id}
-                style={{
-                  background:
-                    "rgba(255,255,255,0.03)",
-                  border:
-                    "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: "10px",
-                  padding: "1.5rem",
-                }}
-              >
-                <p
-                  style={{
-                    color: "var(--accent-cyan)",
-                    fontWeight: "bold",
-                  }}
-                >
-                  {asset.id}
-                </p>
-
-                <h3>{asset.name}</h3>
-
-                <p
-                  style={{
-                    color: "var(--text-muted)",
-                    marginTop: "0.8rem",
-                  }}
-                >
-                  {asset.description}
-                </p>
-
-                <p style={{ marginTop: "1rem" }}>
-                  <strong>Type:</strong>{" "}
-                  {asset.type}
-                </p>
-
-                <p>
-                  <strong>Status:</strong> 🟢{" "}
-                  {asset.status}
-                </p>
-
-                <p
-                  style={{
-                    fontSize: "0.8rem",
-                    color: "var(--text-muted)",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  <strong>Owner Wallet:</strong>
-                  <br />
-                  {asset.owner}
-                </p>
-
-                <p
-                  style={{
-                    fontSize: "0.75rem",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  Created:
-                  <br />
-                  {asset.createdAt}
-                </p>
-
-                <button
-                  className="card-btn"
-                  onClick={() =>
-                    deleteAsset(
-                      asset.id,
-                      asset.name
-                    )
-                  }
-                  style={{
-                    width: "100%",
-                    marginTop: "1.5rem",
-                  }}
-                >
-                  🗑️ Remove Asset
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* CONTRACT STATUS */}
 
       <div
         className="wallet-status"
-        style={{ marginTop: "2rem" }}
+        style={{
+          marginBottom: "2rem",
+        }}
       >
+
         <strong>
-          ⛓️ Blockchain Integration Status
+          ⛓️ AssetNFT Smart Contract
         </strong>
 
-        <p
+        <p>
+          {CONTRACT_ADDRESSES.AssetNFT}
+        </p>
+
+      </div>
+
+
+      {/* GRID */}
+
+      <div
+        style={{
+          display: "grid",
+
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(320px, 1fr))",
+
+          gap: "1.5rem",
+        }}
+      >
+
+
+        {/* MINT ASSET */}
+
+        <div className="service-card">
+
+          <div className="card-icon">
+            💎
+          </div>
+
+          <h3>
+            Mint Digital Asset
+          </h3>
+
+          <p>
+            Create a new blockchain asset NFT
+            for a verified identity.
+          </p>
+
+
+          <input
+            type="text"
+
+            className="transaction-input"
+
+            placeholder="Recipient wallet address"
+
+            value={recipientAddress}
+
+            onChange={(event) =>
+              setRecipientAddress(
+                event.target.value
+              )
+            }
+          />
+
+
+          <input
+            type="text"
+
+            className="transaction-input"
+
+            placeholder="Asset metadata or CID"
+
+            value={metadataCID}
+
+            onChange={(event) =>
+              setMetadataCID(
+                event.target.value
+              )
+            }
+          />
+
+
+          <button
+            className="card-btn"
+
+            onClick={mintAsset}
+
+            disabled={isMinting}
+          >
+
+            {isMinting
+              ? "Minting..."
+              : "Mint Asset on Blockchain →"}
+
+          </button>
+
+
+          {/* MINT RESULT */}
+
+          {mintResult && (
+
+            <div
+              className={`verification-result ${mintResult.type}`}
+            >
+
+              <h3>
+
+                {mintResult.type ===
+                "success"
+                  ? "✓ Asset Minted"
+                  : mintResult.type ===
+                    "error"
+                  ? "⚠ Mint Failed"
+                  : "⏳ Processing"}
+
+              </h3>
+
+
+              <p>
+                {mintResult.message}
+              </p>
+
+
+              {mintResult.transactionHash && (
+
+                <div className="hash-result">
+
+                  <strong>
+                    Transaction Hash:
+                  </strong>
+
+                  <p
+                    style={{
+                      wordBreak:
+                        "break-all",
+                    }}
+                  >
+                    {mintResult.transactionHash}
+                  </p>
+
+                </div>
+
+              )}
+
+
+              {mintResult.blockNumber && (
+
+                <p>
+
+                  <strong>
+                    Block:
+                  </strong>
+
+                  {" "}
+
+                  {mintResult.blockNumber}
+
+                </p>
+
+              )}
+
+            </div>
+
+          )}
+
+        </div>
+
+
+        {/* CHECK ASSET */}
+
+        <div className="service-card">
+
+          <div className="card-icon">
+            🔍
+          </div>
+
+          <h3>
+            Verify Asset
+          </h3>
+
+          <p>
+            Search a digital asset directly
+            from the blockchain.
+          </p>
+
+
+          <input
+            type="number"
+
+            className="transaction-input"
+
+            placeholder="Enter Asset Token ID"
+
+            value={assetTokenId}
+
+            onChange={(event) =>
+              setAssetTokenId(
+                event.target.value
+              )
+            }
+          />
+
+
+          <button
+            className="card-btn"
+
+            onClick={checkAsset}
+
+            disabled={isCheckingAsset}
+          >
+
+            {isCheckingAsset
+              ? "Checking..."
+              : "Check Asset →"}
+
+          </button>
+
+
+          {assetOwner && (
+
+            <div
+              className="verification-result success"
+            >
+
+              <h3>
+                ✓ Asset Found
+              </h3>
+
+
+              <p>
+
+                <strong>
+                  Owner:
+                </strong>
+
+              </p>
+
+              <p
+                style={{
+                  wordBreak:
+                    "break-all",
+                }}
+              >
+                {assetOwner}
+              </p>
+
+
+              <p>
+
+                <strong>
+                  Metadata:
+                </strong>
+
+              </p>
+
+              <p>
+                {assetMetadata?.metadataCID}
+              </p>
+
+
+              <p>
+
+                <strong>
+                  Minted:
+                </strong>
+
+              </p>
+
+              <p>
+                {assetMetadata?.mintedAt}
+              </p>
+
+            </div>
+
+          )}
+
+        </div>
+
+
+        {/* WALLET ASSETS */}
+
+        <div className="service-card">
+
+          <div className="card-icon">
+            👛
+          </div>
+
+          <h3>
+            My Digital Assets
+          </h3>
+
+          <p>
+            Check how many AssetNFT tokens
+            are owned by your wallet.
+          </p>
+
+
+          <p
+            style={{
+              marginTop:
+                "1rem",
+
+              color:
+                "var(--text-muted)",
+            }}
+          >
+
+            Wallet:
+
+            {" "}
+
+            {isConnected
+              ? shortenAddress(
+                  walletAddress
+                )
+              : "Not Connected"}
+
+          </p>
+
+
+          <button
+            className="card-btn"
+
+            onClick={
+              checkWalletAssets
+            }
+
+            disabled={
+              isCheckingBalance
+            }
+          >
+
+            {isCheckingBalance
+              ? "Checking..."
+              : "Check My Assets →"}
+
+          </button>
+
+
+          {walletBalance !== null && (
+
+            <div
+              className="verification-result success"
+            >
+
+              <h3>
+                💎 Asset Balance
+              </h3>
+
+              <div
+                style={{
+                  fontSize:
+                    "3rem",
+
+                  fontWeight:
+                    "bold",
+
+                  margin:
+                    "1rem 0",
+                }}
+              >
+
+                {walletBalance}
+
+              </div>
+
+              <p>
+                AssetNFT token(s) owned
+                by this wallet.
+              </p>
+
+            </div>
+
+          )}
+
+        </div>
+
+
+      </div>
+
+
+      {/* SECURITY INFORMATION */}
+
+      <div
+        className="service-card"
+
+        style={{
+          marginTop:
+            "2rem",
+        }}
+      >
+
+        <h3>
+          🔐 Asset Security
+        </h3>
+
+
+        <p>
+
+          ApexChain AssetNFT assets are
+          protected by blockchain-based
+          identity verification.
+
+        </p>
+
+
+        <div
           style={{
-            marginTop: "0.5rem",
-            color: "var(--text-muted)",
+            marginTop:
+              "1rem",
+
+            display:
+              "grid",
+
+            gap:
+              "0.8rem",
           }}
         >
-          Asset creation and removal actions are
-          recorded in the shared Audit Trail.
-          Smart contract integration can later connect
-          this module to the AssetNFT contract.
-        </p>
+
+          <p>
+            ✓ Only verified identities can
+            receive assets.
+          </p>
+
+          <p>
+            ✓ Asset ownership is stored on
+            the blockchain.
+          </p>
+
+          <p>
+            ✓ Asset metadata is linked to
+            the smart contract.
+          </p>
+
+          <p>
+            ✓ Transactions require MetaMask
+            confirmation.
+          </p>
+
+        </div>
+
       </div>
-    </div>
+
+
+    </section>
+
   );
+
 }
+
 
 export default DigitalAssets;

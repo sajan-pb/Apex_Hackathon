@@ -17,8 +17,8 @@ async function main() {
     )
   );
   console.log("Loaded addresses:", addresses);
-  const identityRegistry = await ethers.getContractAt("IdentityRegistry", addresses.IdentityRegistry);
-  const assetNFT = await ethers.getContractAt("AssetNFT", addresses.AssetNFT);
+  const identityRegistry = await ethers.getContractAt("IdentityRegistry", addresses.identityRegistry);
+  const assetNFT = await ethers.getContractAt("AssetNFT", addresses.assetNFT);
 
   const docsDir = path.join(__dirname, "..", "..", "backend", "data", "identity-docs");
   const recipients = [manager, user];

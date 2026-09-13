@@ -1,736 +1,191 @@
 import { useState } from "react";
 import { ethers } from "ethers";
-
-import { getSigner, getProvider } from "../blockchain/provider";
-import {
-  IdentityRegistryABI,
-} from "../blockchain/contracts";
-
-import {
-  CONTRACT_ADDRESSES,
-} from "../blockchain/addresses";
-
+import { getProvider, getSigner } from "../blockchain/provider.js";
+import { getContract } from "../blockchain/contracts.js";
 
 function Identity({ walletAddress, isConnected }) {
+  const [identityAddress, setIdentityAddress] = useState("");
+  const [cid, setCid] = useState("");
+  const [documentText, setDocumentText] = useState("");
+  const [status, setStatus] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [identityResult, setIdentityResult] = useState(null);
 
-  const [identityAddress, setIdentityAddress] =
-    useState("");
-
-  const [cid, setCid] =
-    useState("");
-
-  const [documentText, setDocumentText] =
-    useState("");
-
-  const [status, setStatus] =
-    useState("");
-
-  const [isLoading, setIsLoading] =
-    useState(false);
-
-  const [identityResult, setIdentityResult] =
-    useState(null);
-
-
-  // ==========================================
-  // GET CONTRACT WITH SIGNER
-  // ==========================================
-
-  const getIdentityContract = async () => {
-
-    const signer =
-      await getSigner();
-
-    return new ethers.Contract(
-      CONTRACT_ADDRESSES.IdentityRegistry,
-      IdentityRegistryABI,
-      signer
-    );
-  };
-
-
-  // ==========================================
-  // ISSUE IDENTITY
-  // ==========================================
+  const addressToCheck = identityAddress.trim() || walletAddress || "";
 
   const issueIdentity = async () => {
-
     try {
-
-      if (!isConnected) {
-
-        setStatus(
-          "❌ Please connect your wallet first."
-        );
-
-        return;
-      }
-
-
-      if (
-        !ethers.isAddress(identityAddress)
-      ) {
-
-        setStatus(
-          "❌ Please enter a valid wallet address."
-        );
-
-        return;
-      }
-
-
-      if (!cid.trim()) {
-
-        setStatus(
-          "❌ Please enter a Document CID."
-        );
-
-        return;
-      }
-
-
-      if (!documentText.trim()) {
-
-        setStatus(
-          "❌ Please enter document content."
-        );
-
-        return;
-      }
-
+      if (!isConnected) throw new Error("Please connect MetaMask first.");
+      if (!ethers.isAddress(identityAddress)) throw new Error("Enter a valid wallet address.");
+      if (!cid.trim()) throw new Error("Enter a document CID/reference.");
+      if (!documentText.trim()) throw new Error("Enter the document content.");
 
       setIsLoading(true);
+      setStatus("Preparing blockchain transaction...");
+      const contract = getContract("IdentityRegistry", await getSigner());
+      const documentHash = ethers.keccak256(ethers.toUtf8Bytes(documentText));
 
-      setStatus(
-        "⏳ Preparing blockchain transaction..."
-      );
-
-
-      const contract =
-        await getIdentityContract();
-
-
-      // CREATE DOCUMENT HASH
-
-      const documentBytes =
-        ethers.toUtf8Bytes(
-          documentText
-        );
-
-
-      const documentHash =
-        ethers.keccak256(
-          documentBytes
-        );
-
-
-      setStatus(
-        "⏳ Sending transaction to MetaMask..."
-      );
-
-
-      const transaction =
-        await contract.issueIdentity(
-          identityAddress,
-          cid,
-          documentHash
-        );
-
-
-      setStatus(
-        "⏳ Transaction sent. Waiting for confirmation..."
-      );
-
-
-      await transaction.wait();
-
-
-      setStatus(
-        "✅ Identity successfully issued on blockchain!"
-      );
-
+      setStatus("Waiting for MetaMask confirmation...");
+      const tx = await contract.issueIdentity(identityAddress, cid.trim(), documentHash);
+      setStatus("Transaction submitted. Waiting for confirmation...");
+      const receipt = await tx.wait();
 
       setIdentityResult({
-        address:
-          identityAddress,
-
-        cid:
-          cid,
-
-        documentHash:
-          documentHash,
-
-        transactionHash:
-          transaction.hash,
+        address: identityAddress,
+        cid: cid.trim(),
+        documentHash,
+        transactionHash: tx.hash,
+        blockNumber: receipt.blockNumber,
       });
-
-
+      setStatus("Identity successfully issued on the blockchain.");
     } catch (error) {
-
       console.error(error);
-
-
-      setStatus(
-        `❌ ${
-          error.reason ||
-          error.shortMessage ||
-          error.message
-        }`
-      );
-
+      setStatus(`Error: ${error.reason || error.shortMessage || error.message}`);
     } finally {
-
       setIsLoading(false);
-
     }
-
   };
-
-
-  // ==========================================
-  // CHECK IDENTITY
-  // ==========================================
 
   const checkIdentity = async () => {
-
     try {
-
-      if (
-        !ethers.isAddress(identityAddress)
-      ) {
-
-        setStatus(
-          "❌ Enter a valid wallet address first."
-        );
-
-        return;
-
-      }
-
-
+      if (!ethers.isAddress(addressToCheck)) throw new Error("Enter a valid wallet address.");
       setIsLoading(true);
-
-
-      const provider =
-        getProvider();
-
-
-      const contract =
-        new ethers.Contract(
-          CONTRACT_ADDRESSES.IdentityRegistry,
-          IdentityRegistryABI,
-          provider
-        );
-
-
-      const tokenId =
-        await contract.identityOf(
-          identityAddress
-        );
-
-
-      const valid =
-        await contract.hasValidIdentity(
-          identityAddress
-        );
-
-
+      const contract = getContract("IdentityRegistry", getProvider());
+      const tokenId = await contract.identityOf(addressToCheck);
       if (tokenId === 0n) {
-
-        setStatus(
-          "❌ No identity found for this wallet."
-        );
-
-        setIdentityResult(null);
-
-      } else {
-
-        setStatus(
-          valid
-            ? "✅ Valid identity found!"
-            : "⚠️ Identity exists but has been revoked."
-        );
-
-
-        setIdentityResult({
-
-          address:
-            identityAddress,
-
-          tokenId:
-            tokenId.toString(),
-
-          valid:
-
-            valid
-              ? "Valid"
-              : "Revoked",
-
-        });
-
+        setIdentityResult({ address: addressToCheck, valid: "No identity" });
+        setStatus("No blockchain identity exists for this wallet.");
+        return;
       }
 
-
+      const valid = await contract.hasValidIdentity(addressToCheck);
+      const data = await contract.identities(tokenId);
+      setIdentityResult({
+        address: addressToCheck,
+        tokenId: tokenId.toString(),
+        valid: valid ? "Valid" : "Revoked",
+        cid: data.didDocumentCID,
+        documentHash: data.docHash,
+        issuedBy: data.issuedBy,
+        issuedAt: new Date(Number(data.issuedAt) * 1000).toLocaleString(),
+      });
+      setStatus(valid ? "Valid identity found on blockchain." : "Identity exists but has been revoked.");
     } catch (error) {
-
       console.error(error);
-
-
-      setStatus(
-        `❌ ${
-          error.shortMessage ||
-          error.message
-        }`
-      );
-
+      setStatus(`Error: ${error.reason || error.shortMessage || error.message}`);
     } finally {
-
       setIsLoading(false);
-
     }
-
   };
 
+  const verifyDocument = async () => {
+    try {
+      if (!ethers.isAddress(addressToCheck)) throw new Error("Enter a valid wallet address.");
+      if (!documentText.trim()) throw new Error("Enter the document content to verify.");
+      setIsLoading(true);
+      const contract = getContract("IdentityRegistry", getProvider());
+      const tokenId = await contract.identityOf(addressToCheck);
+      if (tokenId === 0n) throw new Error("No identity exists for this wallet.");
 
-  // ==========================================
-  // REVOKE IDENTITY
-  // ==========================================
+      const matches = await contract.verifyDocument(tokenId, ethers.toUtf8Bytes(documentText));
+      const hash = ethers.keccak256(ethers.toUtf8Bytes(documentText));
+      setIdentityResult((previous) => ({
+        ...(previous || {}),
+        address: addressToCheck,
+        tokenId: tokenId.toString(),
+        documentHash: hash,
+        documentMatch: matches,
+      }));
+      setStatus(matches ? "Document matches the hash stored on-chain." : "Document does NOT match the on-chain hash.");
+    } catch (error) {
+      console.error(error);
+      setStatus(`Error: ${error.reason || error.shortMessage || error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const revokeIdentity = async () => {
-
     try {
-
-      if (!identityResult?.tokenId) {
-
-        setStatus(
-          "❌ Check an identity first."
-        );
-
-        return;
-
-      }
-
-
+      if (!identityResult?.tokenId) throw new Error("Check an identity first.");
       setIsLoading(true);
-
-
-      setStatus(
-        "⏳ Sending revoke transaction..."
-      );
-
-
-      const contract =
-        await getIdentityContract();
-
-
-      const transaction =
-        await contract.revokeIdentity(
-          identityResult.tokenId
-        );
-
-
-      await transaction.wait();
-
-
-      setStatus(
-        "✅ Identity revoked successfully!"
-      );
-
-
-      setIdentityResult({
-        ...identityResult,
-
-        valid:
-          "Revoked",
-
-        transactionHash:
-          transaction.hash,
-
-      });
-
-
+      setStatus("Waiting for MetaMask confirmation...");
+      const contract = getContract("IdentityRegistry", await getSigner());
+      const tx = await contract.revokeIdentity(identityResult.tokenId);
+      await tx.wait();
+      setIdentityResult((previous) => ({ ...previous, valid: "Revoked", transactionHash: tx.hash }));
+      setStatus("Identity revoked on the blockchain.");
     } catch (error) {
-
       console.error(error);
-
-
-      setStatus(
-        `❌ ${
-          error.reason ||
-          error.shortMessage ||
-          error.message
-        }`
-      );
-
+      setStatus(`Error: ${error.reason || error.shortMessage || error.message}`);
     } finally {
-
       setIsLoading(false);
-
     }
-
   };
 
+  const inputStyle = { width: "100%", marginTop: "0.8rem" };
 
   return (
-
     <section className="dashboard">
-
-
       <div className="section-title">
-
-        <h2>
-          Decentralized Identity
-        </h2>
-
-        <p>
-          Issue, verify and revoke
-          blockchain-based identities.
-        </p>
-
+        <h2>Decentralized Identity</h2>
+        <p>Issue, verify, cryptographically verify documents, and revoke blockchain identities.</p>
       </div>
 
-
-      {/* WALLET STATUS */}
-
-      <div
-        className="service-card"
-        style={{
-          marginBottom: "2rem",
-        }}
-      >
-
-        <h3>
-          👛 Connected Wallet
-        </h3>
-
-
-        <p>
-
-          {isConnected
-            ? walletAddress
-            : "Wallet not connected"}
-
-        </p>
-
+      <div className="wallet-status" style={{ marginBottom: "2rem" }}>
+        <strong>Connected Wallet</strong>
+        <p style={{ marginTop: "0.5rem", wordBreak: "break-all" }}>{isConnected ? walletAddress : "Wallet not connected"}</p>
       </div>
 
-
-      {/* ISSUE IDENTITY */}
-
-      <div
-        className="service-card"
-        style={{
-          marginBottom: "2rem",
-        }}
-      >
-
-        <div className="card-icon">
-          🪪
-        </div>
-
-
-        <h3>
-          Issue Identity
-        </h3>
-
-
-        <p>
-          Create a permanent decentralized
-          identity on the blockchain.
-        </p>
-
-
-        <input
-          className="transaction-input"
-
-          placeholder="Wallet Address"
-
-          value={identityAddress}
-
-          onChange={(event) =>
-            setIdentityAddress(
-              event.target.value
-            )
-          }
-        />
-
-
-        <input
-          className="transaction-input"
-
-          placeholder="Document CID (example: ipfs://...)"
-
-          value={cid}
-
-          onChange={(event) =>
-            setCid(
-              event.target.value
-            )
-          }
-        />
-
-
-        <textarea
-          className="transaction-input"
-
-          placeholder="Document Content"
-
-          value={documentText}
-
-          onChange={(event) =>
-            setDocumentText(
-              event.target.value
-            )
-          }
-
-          rows="4"
-        />
-
-
-        <button
-          className="card-btn"
-
-          onClick={issueIdentity}
-
-          disabled={isLoading}
-        >
-
-          {isLoading
-            ? "Processing..."
-            : "Issue Identity on Blockchain"}
-
-        </button>
-
+      <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+        <div className="card-icon">🪪</div>
+        <h3>Issue Identity</h3>
+        <p>Creates an ERC-721-based, non-transferable identity and stores the document hash and reference on-chain.</p>
+        <input className="transaction-input" style={inputStyle} placeholder="Wallet address" value={identityAddress} onChange={(e) => setIdentityAddress(e.target.value)} />
+        <input className="transaction-input" style={inputStyle} placeholder="Document CID / reference (e.g. ipfs://...)" value={cid} onChange={(e) => setCid(e.target.value)} />
+        <textarea className="transaction-input" style={inputStyle} rows="5" placeholder="Document content — its keccak256 hash is stored on-chain" value={documentText} onChange={(e) => setDocumentText(e.target.value)} />
+        <button className="card-btn" style={{ marginTop: "1rem" }} onClick={issueIdentity} disabled={isLoading}>Issue Identity</button>
       </div>
 
-
-      {/* CHECK IDENTITY */}
-
-      <div
-        className="service-card"
-        style={{
-          marginBottom: "2rem",
-        }}
-      >
-
-        <div className="card-icon">
-          🔍
-        </div>
-
-
-        <h3>
-          Verify Identity
-        </h3>
-
-
-        <p>
-          Check whether a wallet has
-          a valid blockchain identity.
-        </p>
-
-
-        <button
-          className="card-btn"
-
-          onClick={checkIdentity}
-
-          disabled={isLoading}
-        >
-
-          Check Identity
-
-        </button>
-
+      <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+        <div className="card-icon">🔍</div>
+        <h3>Verify Identity</h3>
+        <p>Reads the identity token and revocation status directly from IdentityRegistry.</p>
+        <input className="transaction-input" style={inputStyle} placeholder="Wallet address (blank = connected wallet)" value={identityAddress} onChange={(e) => setIdentityAddress(e.target.value)} />
+        <button className="card-btn" style={{ marginTop: "1rem" }} onClick={checkIdentity} disabled={isLoading}>Check On-Chain Identity</button>
       </div>
 
-
-      {/* REVOKE */}
-
-      <div
-        className="service-card"
-        style={{
-          marginBottom: "2rem",
-        }}
-      >
-
-        <div className="card-icon">
-          🚫
-        </div>
-
-
-        <h3>
-          Revoke Identity
-        </h3>
-
-
-        <p>
-          Revoke the selected
-          blockchain identity.
-        </p>
-
-
-        <button
-          className="card-btn"
-
-          onClick={revokeIdentity}
-
-          disabled={
-            isLoading ||
-            !identityResult?.tokenId
-          }
-        >
-
-          Revoke Identity
-
-        </button>
-
+      <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+        <div className="card-icon">🔐</div>
+        <h3>Verify Document Integrity</h3>
+        <p>Hashes the supplied document and compares it with the immutable document hash stored in the identity record.</p>
+        <input className="transaction-input" style={inputStyle} placeholder="Wallet address (blank = connected wallet)" value={identityAddress} onChange={(e) => setIdentityAddress(e.target.value)} />
+        <textarea className="transaction-input" style={inputStyle} rows="5" placeholder="Paste the exact document content" value={documentText} onChange={(e) => setDocumentText(e.target.value)} />
+        <button className="card-btn" style={{ marginTop: "1rem" }} onClick={verifyDocument} disabled={isLoading}>Verify Document Hash</button>
       </div>
 
+      <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+        <div className="card-icon">🚫</div>
+        <h3>Revoke Identity</h3>
+        <p>Manager-only blockchain operation. A revoked identity can no longer receive assets.</p>
+        <button className="card-btn" onClick={revokeIdentity} disabled={isLoading || !identityResult?.tokenId}>Revoke Identity</button>
+      </div>
 
-      {/* STATUS */}
-
-      {status && (
-
-        <div
-          className="service-card"
-          style={{
-            marginBottom: "2rem",
-          }}
-        >
-
-          <h3>
-            Blockchain Status
-          </h3>
-
-          <p>
-            {status}
-          </p>
-
-        </div>
-
-      )}
-
-
-      {/* RESULT */}
+      {status && <div className="wallet-status" style={{ marginBottom: "1.5rem" }}><strong>Blockchain Result</strong><p style={{ marginTop: "0.5rem", wordBreak: "break-word" }}>{status}</p></div>}
 
       {identityResult && (
-
-        <div
-          className="service-card"
-        >
-
-          <h3>
-            Identity Result
-          </h3>
-
-
-          <p>
-
-            <strong>
-              Wallet:
-            </strong>
-
-            <br />
-
-            {identityResult.address}
-
-          </p>
-
-
-          {identityResult.tokenId && (
-
-            <p>
-
-              <strong>
-                Token ID:
-              </strong>
-
-              {" "}
-
-              {identityResult.tokenId}
-
-            </p>
-
+        <div className="service-card">
+          <h3>On-Chain Identity Record</h3>
+          {Object.entries(identityResult).map(([key, value]) => value !== undefined && key !== "documentMatch" ? (
+            <p key={key} style={{ marginTop: "0.7rem", wordBreak: "break-all" }}><strong>{key}:</strong> {String(value)}</p>
+          ) : null)}
+          {identityResult.documentMatch !== undefined && (
+            <p style={{ marginTop: "0.8rem", fontWeight: "bold" }}>{identityResult.documentMatch ? "✓ Document hash matches" : "✗ Document hash does not match"}</p>
           )}
-
-
-          {identityResult.cid && (
-
-            <p>
-
-              <strong>
-                CID:
-              </strong>
-
-              {" "}
-
-              {identityResult.cid}
-
-            </p>
-
-          )}
-
-
-          {identityResult.documentHash && (
-
-            <p>
-
-              <strong>
-                Document Hash:
-              </strong>
-
-              <br />
-
-              {identityResult.documentHash}
-
-            </p>
-
-          )}
-
-
-          {identityResult.valid && (
-
-            <p>
-
-              <strong>
-                Status:
-              </strong>
-
-              {" "}
-
-              {identityResult.valid}
-
-            </p>
-
-          )}
-
-
-          {identityResult.transactionHash && (
-
-            <p>
-
-              <strong>
-                Transaction:
-              </strong>
-
-              <br />
-
-              {identityResult.transactionHash}
-
-            </p>
-
-          )}
-
         </div>
-
       )}
-
-
     </section>
-
   );
-
 }
-
 
 export default Identity;

@@ -1,369 +1,179 @@
-import { useState, useEffect } from "react";
-import { getSigner } from "../blockchain/provider.js";
+import { useEffect, useState } from "react";
+import { getSigner, getProvider } from "../blockchain/provider.js";
 import { getContract } from "../blockchain/contracts.js";
 
 const ZERO_BYTES32 = "0x" + "0".repeat(64);
+const ACTION_VALUES = { GRANT_ROLE: 0, REVOKE_ROLE: 1, REVOKE_IDENTITY: 2 };
+const ACTION_LABELS = ["Grant Role", "Revoke Role", "Revoke Identity"];
 
-function AccessControl({ walletAddress, isConnected, addActivity }) {
-  // ===== ORIGINAL LOCAL DEMO STATE =====
-  const [users, setUsers] = useState([]);
-  const [newWallet, setNewWallet] = useState("");
-  const [selectedRole, setSelectedRole] = useState("User");
-  const [message, setMessage] = useState("");
-
-  const roles = [
-    { name: "Admin", icon: "👑", description: "Full platform access and user management." },
-    { name: "Manager", icon: "🛡️", description: "Manage assets and monitor platform activity." },
-    { name: "User", icon: "👤", description: "Basic access to identity and digital assets." },
-    { name: "Auditor", icon: "🔍", description: "View blockchain activity and audit records." },
-  ];
-
-  // ===== REAL ON-CHAIN GOVERNANCE STATE =====
+function AccessControl({ walletAddress, isConnected }) {
   const [admins, setAdmins] = useState([]);
   const [proposals, setProposals] = useState([]);
-  const [isCurrentUserAdmin, setIsCurrentUserAdmin] = useState(false);
-  const [govLoading, setGovLoading] = useState(false);
-  const [govMessage, setGovMessage] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [roleStatus, setRoleStatus] = useState(null);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [action, setAction] = useState("GRANT_ROLE");
+  const [target, setTarget] = useState("IdentityRegistry");
+  const [roleName, setRoleName] = useState("MANAGER");
+  const [account, setAccount] = useState("");
 
-  const [proposeTarget, setProposeTarget] = useState("IdentityRegistry");
-  const [proposeAction, setProposeAction] = useState("GRANT_ROLE");
-  const [proposeRoleName, setProposeRoleName] = useState("MANAGER");
-  const [proposeAccount, setProposeAccount] = useState("");
+  const shorten = (a) => a ? `${a.slice(0, 8)}...${a.slice(-6)}` : "";
 
-  const ACTION_LABELS = ["Grant Role", "Revoke Role", "Revoke Identity"];
-  const ACTION_VALUES = { GRANT_ROLE: 0, REVOKE_ROLE: 1, REVOKE_IDENTITY: 2 };
-
-  const shortenAddress = (address) => {
-    if (!address) return "";
-    if (address.length < 15) return address;
-    return `${address.slice(0, 8)}...${address.slice(-6)}`;
-  };
-
-  const loadGovernanceState = async () => {
+  const load = async () => {
     if (!isConnected) return;
-    setGovLoading(true);
-    setGovMessage("");
     try {
-      const signer = await getSigner();
-      const multisig = getContract("MultiSigAdmin", signer);
+      const provider = getProvider();
+      const multisig = getContract("MultiSigAdmin", provider);
+      const current = walletAddress || (await (await getSigner()).getAddress());
+      const [a0, a1, a2] = await Promise.all([multisig.admins(0), multisig.admins(1), multisig.admins(2)]);
+      setAdmins([a0, a1, a2]);
+      setIsAdmin(await multisig.isAdmin(current));
 
-      const adminAddresses = await Promise.all([
-        multisig.admins(0),
-        multisig.admins(1),
-        multisig.admins(2),
-      ]);
-      setAdmins(adminAddresses);
-
-      const currentAddr = await signer.getAddress();
-      setIsCurrentUserAdmin(await multisig.isAdmin(currentAddr));
+      const identity = getContract("IdentityRegistry", provider);
+      const asset = getContract("AssetNFT", provider);
+      const managerIdentity = await identity.MANAGER_ROLE();
+      const auditorIdentity = await identity.AUDITOR_ROLE();
+      const adminIdentity = await identity.DEFAULT_ADMIN_ROLE();
+      const managerAsset = await asset.MANAGER_ROLE();
+      const auditorAsset = await asset.AUDITOR_ROLE();
+      const adminAsset = await asset.DEFAULT_ADMIN_ROLE();
+      setRoleStatus({
+        identity: {
+          manager: await identity.hasRole(managerIdentity, current),
+          auditor: await identity.hasRole(auditorIdentity, current),
+          admin: await identity.hasRole(adminIdentity, current),
+        },
+        asset: {
+          manager: await asset.hasRole(managerAsset, current),
+          auditor: await asset.hasRole(auditorAsset, current),
+          admin: await asset.hasRole(adminAsset, current),
+        },
+      });
 
       const count = Number(await multisig.proposalCount());
       const loaded = [];
       for (let i = 0; i < count; i++) {
         const p = await multisig.proposals(i);
-        loaded.push({
-          id: i,
-          actionType: Number(p[0]),
-          target: p[1],
-          role: p[2],
-          account: p[3],
-          confirmations: Number(p[4]),
-          executed: p[5],
-        });
+        loaded.push({ id: i, actionType: Number(p[0]), target: p[1], role: p[2], account: p[3], confirmations: Number(p[4]), executed: p[5] });
       }
       setProposals(loaded.reverse());
     } catch (error) {
       console.error(error);
-      setGovMessage("❌ Could not load governance data: " + (error.reason || error.message));
-    } finally {
-      setGovLoading(false);
+      setMessage(`Error loading on-chain access data: ${error.reason || error.shortMessage || error.message}`);
     }
   };
 
-  useEffect(() => {
-    loadGovernanceState();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, walletAddress]);
+  useEffect(() => { load(); }, [isConnected, walletAddress]);
 
   const submitProposal = async (e) => {
     e.preventDefault();
-    setGovMessage("");
-
-    if (!isConnected) {
-      setGovMessage("❌ Connect your wallet first.");
-      return;
-    }
-    const walletPattern = /^0x[a-fA-F0-9]{40}$/;
-    if (!walletPattern.test(proposeAccount.trim())) {
-      setGovMessage("❌ Enter a valid wallet address for the account field.");
-      return;
-    }
-
     try {
-      setGovLoading(true);
+      if (!isConnected) throw new Error("Connect MetaMask first.");
+      if (!/^0x[a-fA-F0-9]{40}$/.test(account.trim())) throw new Error("Enter a valid target wallet address.");
+      if (action === "REVOKE_IDENTITY") {
+        if (target !== "IdentityRegistry") throw new Error("Identity revocation must target IdentityRegistry.");
+      }
+      setLoading(true); setMessage("");
       const signer = await getSigner();
       const multisig = getContract("MultiSigAdmin", signer);
-      const targetContract = getContract(proposeTarget, signer);
-
+      const targetContract = getContract(target, signer);
       let roleHash = ZERO_BYTES32;
-      if (ACTION_VALUES[proposeAction] !== ACTION_VALUES.REVOKE_IDENTITY) {
-        if (proposeRoleName === "ADMIN") {
-          roleHash = await targetContract.DEFAULT_ADMIN_ROLE();
-        } else if (proposeRoleName === "MANAGER") {
-          roleHash = await targetContract.MANAGER_ROLE();
-        } else if (proposeRoleName === "AUDITOR") {
-          roleHash = await targetContract.AUDITOR_ROLE();
-        }
+      if (action !== "REVOKE_IDENTITY") {
+        roleHash = roleName === "ADMIN" ? await targetContract.DEFAULT_ADMIN_ROLE() : roleName === "MANAGER" ? await targetContract.MANAGER_ROLE() : await targetContract.AUDITOR_ROLE();
       }
-
-      const tx = await multisig.propose(
-        ACTION_VALUES[proposeAction],
-        await targetContract.getAddress(),
-        roleHash,
-        proposeAccount.trim()
-      );
+      const tx = await multisig.propose(ACTION_VALUES[action], await targetContract.getAddress(), roleHash, account.trim());
       await tx.wait();
-
-      setGovMessage("✅ Proposal submitted and auto-confirmed by you (1 of 2 needed).");
-      if (addActivity) {
-        addActivity("Governance", `Proposed ${ACTION_LABELS[ACTION_VALUES[proposeAction]]} for ${proposeAccount.trim()}`);
-      }
-      setProposeAccount("");
-      await loadGovernanceState();
+      setMessage("Proposal created and auto-confirmed by the proposer. A second designated admin must confirm it.");
+      setAccount("");
+      await load();
     } catch (error) {
-      console.error(error);
-      setGovMessage("❌ " + (error.reason || error.message));
-    } finally {
-      setGovLoading(false);
-    }
+      console.error(error); setMessage(`Error: ${error.reason || error.shortMessage || error.message}`);
+    } finally { setLoading(false); }
   };
 
-  const confirmProposal = async (proposalId) => {
-    setGovMessage("");
+  const confirmProposal = async (id) => {
     try {
-      setGovLoading(true);
-      const signer = await getSigner();
-      const multisig = getContract("MultiSigAdmin", signer);
-      const tx = await multisig.confirm(proposalId);
+      setLoading(true); setMessage("");
+      const tx = await getContract("MultiSigAdmin", await getSigner()).confirm(id);
       await tx.wait();
-
-      setGovMessage(`✅ Confirmed proposal #${proposalId}.`);
-      if (addActivity) {
-        addActivity("Governance", `Confirmed proposal #${proposalId}`);
-      }
-      await loadGovernanceState();
+      setMessage(`Proposal #${id} confirmed. The blockchain now has the updated governance state.`);
+      await load();
     } catch (error) {
-      console.error(error);
-      setGovMessage("❌ " + (error.reason || error.message));
-    } finally {
-      setGovLoading(false);
-    }
-  };
-
-  // ===== ORIGINAL LOCAL DEMO HANDLERS =====
-  const addUser = (e) => {
-    e.preventDefault();
-    if (!isConnected) { setMessage("❌ Please connect your wallet first."); return; }
-    if (!newWallet.trim()) { setMessage("❌ Please enter a wallet address."); return; }
-    const walletPattern = /^0x[a-fA-F0-9]{40}$/;
-    if (!walletPattern.test(newWallet.trim())) { setMessage("❌ Please enter a valid Ethereum wallet address."); return; }
-    const walletExists = users.some((user) => user.wallet.toLowerCase() === newWallet.trim().toLowerCase());
-    if (walletExists) { setMessage("⚠️ This wallet already has a role."); return; }
-    const newUser = { id: Date.now(), wallet: newWallet.trim(), role: selectedRole, addedAt: new Date().toLocaleString() };
-    setUsers([...users, newUser]);
-    if (addActivity) addActivity("Access", `${newUser.role} role assigned to wallet ${newUser.wallet}`);
-    setNewWallet("");
-    setSelectedRole("User");
-    setMessage(`✅ ${newUser.role} role assigned successfully.`);
-  };
-
-  const removeUser = (id) => {
-    const user = users.find((item) => item.id === id);
-    setUsers(users.filter((user) => user.id !== id));
-    if (user && addActivity) addActivity("Access", `Access removed from wallet ${user.wallet}`);
-    setMessage("🗑️ User access removed successfully.");
-  };
-
-  const updateRole = (id, role) => {
-    const user = users.find((item) => item.id === id);
-    setUsers(users.map((user) => (user.id === id ? { ...user, role } : user)));
-    if (user && addActivity) addActivity("Access", `Role updated to ${role} for wallet ${user.wallet}`);
-    setMessage("✅ User role updated successfully.");
-  };
-
-  const inputStyle = {
-    width: "100%",
-    background: "rgba(255, 255, 255, 0.05)",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
-    borderRadius: "8px",
-    padding: "12px 16px",
-    color: "white",
-    fontSize: "1rem",
-    outline: "none",
-    boxSizing: "border-box",
+      console.error(error); setMessage(`Error: ${error.reason || error.shortMessage || error.message}`);
+    } finally { setLoading(false); }
   };
 
   return (
-    <div>
-      <div className="section-title" style={{ marginBottom: "2rem" }}>
-        <h2>Access Control</h2>
-        <p>Manage user roles, permissions and blockchain access rights.</p>
+    <section className="dashboard">
+      <div className="section-title">
+        <h2>Role-Based Access Control</h2>
+        <p>Permissions are read from and enforced by the deployed smart contracts.</p>
       </div>
 
-      {isConnected ? (
-        <div className="wallet-status" style={{ marginBottom: "2rem" }}>
-          <strong>🟢 Wallet Connected</strong>
-          <p style={{ marginTop: "0.5rem", wordBreak: "break-all" }}>{walletAddress}</p>
-        </div>
-      ) : (
-        <div className="wallet-status" style={{ marginBottom: "2rem", background: "rgba(239,68,68,0.1)", borderColor: "#ef4444" }}>
-          <strong style={{ color: "#fca5a5" }}>⚠️ Wallet Not Connected</strong>
-          <p style={{ marginTop: "0.5rem", color: "#fca5a5" }}>Connect your MetaMask wallet to use governance.</p>
+      <div className="wallet-status" style={{ marginBottom: "1.5rem" }}>
+        <strong>Current Wallet</strong>
+        <p style={{ marginTop: "0.5rem", wordBreak: "break-all" }}>{isConnected ? walletAddress : "Not connected"}</p>
+        {isConnected && <p style={{ marginTop: "0.5rem" }}>{isAdmin ? "✓ Designated multisig admin" : "Not a designated multisig admin"}</p>}
+      </div>
+
+      {roleStatus && (
+        <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+          <h3>Your On-Chain Privileges</h3>
+          <p style={{ color: "var(--text-muted)", margin: "0.5rem 0 1rem" }}>These values are read directly from AccessControl.</p>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr><th style={{ textAlign: "left", padding: "0.7rem" }}>Contract</th><th>Admin</th><th>Manager</th><th>Auditor</th></tr></thead>
+              <tbody>
+                <tr><td style={{ padding: "0.7rem" }}>IdentityRegistry</td><td style={{ textAlign: "center" }}>{roleStatus.identity.admin ? "✓" : "—"}</td><td style={{ textAlign: "center" }}>{roleStatus.identity.manager ? "✓" : "—"}</td><td style={{ textAlign: "center" }}>{roleStatus.identity.auditor ? "✓" : "—"}</td></tr>
+                <tr><td style={{ padding: "0.7rem" }}>AssetNFT</td><td style={{ textAlign: "center" }}>{roleStatus.asset.admin ? "✓" : "—"}</td><td style={{ textAlign: "center" }}>{roleStatus.asset.manager ? "✓" : "—"}</td><td style={{ textAlign: "center" }}>{roleStatus.asset.auditor ? "✓" : "—"}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p style={{ marginTop: "1rem", color: "var(--text-muted)" }}><strong>Manager:</strong> issue/revoke identities on IdentityRegistry and mint assets on AssetNFT when the corresponding Manager role is granted.</p>
         </div>
       )}
 
-      <div className="service-card" style={{ padding: "2.5rem", marginBottom: "2rem" }}>
-        <div className="card-icon">⛓️</div>
-        <h3>On-Chain Governance — 2-of-3 Multisig</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: "1.5rem" }}>
-          Real, live calls to your deployed MultiSigAdmin contract. No single wallet — including yours,
-          even as an admin — can grant a role or revoke an identity alone. Two of the three designated
-          admins must confirm.
-        </p>
+      <div className="service-card" style={{ marginBottom: "1.5rem" }}>
+        <div className="card-icon">🔐</div>
+        <h3>2-of-3 Multisig Governance</h3>
+        <p>Role changes and identity revocations require two of the three designated admin wallets.</p>
+        <div style={{ margin: "1rem 0" }}><strong>Designated admins</strong>{admins.map((a, i) => <p key={a} style={{ fontFamily: "monospace", marginTop: "0.4rem" }}>Admin {i + 1}: {shorten(a)}</p>)}</div>
 
-        {admins.length > 0 && (
-          <div style={{ marginBottom: "1.5rem" }}>
-            <strong>Designated admins:</strong>
-            <ul style={{ marginTop: "0.5rem" }}>
-              {admins.map((a, i) => (
-                <li key={i} style={{ fontFamily: "monospace", fontSize: "0.9rem" }}>
-                  {shortenAddress(a)} {walletAddress?.toLowerCase() === a?.toLowerCase() && "(you)"}
-                </li>
-              ))}
-            </ul>
-            {isConnected && (
-              <p style={{ marginTop: "0.5rem" }}>
-                {isCurrentUserAdmin
-                  ? "✅ Your wallet is a designated admin."
-                  : "You are not one of the three designated admins — you can view proposals but not propose or confirm."}
-              </p>
-            )}
-          </div>
-        )}
-
-        {govMessage && (
-          <div className="wallet-status" style={{ marginBottom: "1.5rem" }}>
-            <p>{govMessage}</p>
-          </div>
-        )}
-
-        {isConnected && isCurrentUserAdmin && (
-          <form onSubmit={submitProposal} style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "2rem" }}>
-            <select value={proposeAction} onChange={(e) => setProposeAction(e.target.value)} style={inputStyle}>
+        {isAdmin && (
+          <form onSubmit={submitProposal} style={{ display: "grid", gap: "0.8rem" }}>
+            <select value={action} onChange={(e) => setAction(e.target.value)} className="transaction-input">
               <option value="GRANT_ROLE">Grant Role</option>
               <option value="REVOKE_ROLE">Revoke Role</option>
               <option value="REVOKE_IDENTITY">Revoke Identity</option>
             </select>
-
-            <select value={proposeTarget} onChange={(e) => setProposeTarget(e.target.value)} style={inputStyle}>
-              <option value="IdentityRegistry">IdentityRegistry</option>
-              <option value="AssetNFT">AssetNFT</option>
-            </select>
-
-            {proposeAction !== "REVOKE_IDENTITY" && (
-              <select value={proposeRoleName} onChange={(e) => setProposeRoleName(e.target.value)} style={inputStyle}>
-                <option value="MANAGER">Manager</option>
-                <option value="AUDITOR">Auditor</option>
-                <option value="ADMIN">Admin</option>
-              </select>
+            {action === "REVOKE_IDENTITY" ? (
+              <select value={target} onChange={(e) => setTarget(e.target.value)} className="transaction-input"><option value="IdentityRegistry">IdentityRegistry</option></select>
+            ) : (
+              <select value={target} onChange={(e) => setTarget(e.target.value)} className="transaction-input"><option value="IdentityRegistry">IdentityRegistry</option><option value="AssetNFT">AssetNFT</option></select>
             )}
-
-            <input
-              type="text"
-              placeholder="Account address (0x...)"
-              value={proposeAccount}
-              onChange={(e) => setProposeAccount(e.target.value)}
-              style={inputStyle}
-            />
-
-            <button type="submit" className="hero-button" disabled={govLoading}>
-              {govLoading ? "Submitting..." : "Propose Action →"}
-            </button>
+            {action !== "REVOKE_IDENTITY" && <select value={roleName} onChange={(e) => setRoleName(e.target.value)} className="transaction-input"><option value="MANAGER">Manager</option><option value="AUDITOR">Auditor</option><option value="ADMIN">Admin</option></select>}
+            <input className="transaction-input" placeholder="Wallet address" value={account} onChange={(e) => setAccount(e.target.value)} />
+            <button className="hero-button" type="submit" disabled={loading}>{loading ? "Submitting..." : "Create Proposal"}</button>
           </form>
         )}
-
-        <h4 style={{ marginBottom: "1rem" }}>Proposals</h4>
-        {proposals.length === 0 ? (
-          <p style={{ color: "var(--text-muted)" }}>No proposals yet.</p>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            {proposals.map((p) => (
-              <div key={p.id} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "1.5rem" }}>
-                <strong>#{p.id} — {ACTION_LABELS[p.actionType]}</strong>
-                <p style={{ fontFamily: "monospace", fontSize: "0.85rem", wordBreak: "break-all", margin: "0.5rem 0" }}>
-                  account: {p.account}
-                </p>
-                <p>Confirmations: {p.confirmations} / 2 {p.executed ? "— ✅ Executed" : "— ⏳ Pending"}</p>
-                {isCurrentUserAdmin && !p.executed && (
-                  <button className="card-btn" onClick={() => confirmProposal(p.id)} disabled={govLoading}>
-                    Confirm
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {!isAdmin && isConnected && <p style={{ color: "var(--text-muted)" }}>This wallet can observe governance but cannot propose or confirm.</p>}
       </div>
 
-      <div className="wallet-status" style={{ marginBottom: "1.5rem", background: "rgba(255,255,255,0.03)" }}>
-        <strong>📋 Local Role Preview (not connected to the blockchain)</strong>
-        <p style={{ marginTop: "0.5rem", color: "var(--text-muted)" }}>
-          The section below is a local, illustrative preview only — it doesn't call the smart contract
-          and resets on page refresh. Use the On-Chain Governance section above for anything real.
-        </p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
-        {roles.map((role) => (
-          <div key={role.name} className="service-card" style={{ padding: "1.5rem" }}>
-            <div style={{ fontSize: "2rem", marginBottom: "0.8rem" }}>{role.icon}</div>
-            <h3>{role.name}</h3>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>{role.description}</p>
+      <div className="service-card">
+        <h3>Governance Proposals</h3>
+        {proposals.length === 0 ? <p style={{ color: "var(--text-muted)" }}>No proposals recorded on-chain.</p> : proposals.map((p) => (
+          <div key={p.id} style={{ marginTop: "1rem", padding: "1rem", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px" }}>
+            <strong>#{p.id} — {ACTION_LABELS[p.actionType]}</strong>
+            <p style={{ marginTop: "0.4rem", wordBreak: "break-all" }}>Target: {shorten(p.target)}</p>
+            <p style={{ marginTop: "0.4rem", wordBreak: "break-all" }}>Account: {p.account}</p>
+            <p style={{ marginTop: "0.4rem" }}>Confirmations: {p.confirmations} / 2 {p.executed ? "✓ Executed" : "— Pending"}</p>
+            {isAdmin && !p.executed && <button className="card-btn" style={{ marginTop: "0.6rem" }} onClick={() => confirmProposal(p.id)} disabled={loading}>Confirm</button>}
           </div>
         ))}
+        {message && <div className="wallet-status" style={{ marginTop: "1rem" }}><p>{message}</p></div>}
       </div>
-
-      <div className="service-card" style={{ padding: "2.5rem", marginBottom: "2rem" }}>
-        <div className="card-icon">➕</div>
-        <h3>Assign User Role (local preview)</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: "1.5rem" }}>Assign a role locally — not on-chain.</p>
-        {!isConnected ? (
-          <p style={{ color: "#fca5a5" }}>⚠️ Connect your wallet before assigning access roles.</p>
-        ) : (
-          <form onSubmit={addUser} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            <input type="text" placeholder="Enter wallet address" value={newWallet} onChange={(e) => setNewWallet(e.target.value)} style={inputStyle} />
-            <select value={selectedRole} onChange={(e) => setSelectedRole(e.target.value)} style={inputStyle}>
-              {roles.map((role) => (<option key={role.name} value={role.name}>{role.icon} {role.name}</option>))}
-            </select>
-            <button type="submit" className="hero-button" style={{ width: "100%", marginTop: "1rem" }}>Assign Role →</button>
-          </form>
-        )}
-      </div>
-
-      {users.length > 0 && (
-        <div className="service-card" style={{ padding: "2.5rem" }}>
-          <h3>Local Preview Registry</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-            {users.map((user) => (
-              <div key={user.id} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "1.5rem" }}>
-                <p style={{ fontFamily: "monospace" }}>{shortenAddress(user.wallet)} — {user.role}</p>
-                <button className="card-btn" onClick={() => removeUser(user.id)}>Remove</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    </section>
   );
 }
 

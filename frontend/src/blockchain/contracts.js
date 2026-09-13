@@ -1,10 +1,6 @@
 import { ethers } from "ethers";
 import { CONTRACT_ADDRESSES } from "./addresses.js";
 
-// ==========================================
-// IDENTITY REGISTRY ABI
-// ==========================================
-
 export const IdentityRegistryABI = [
   {
     type: "function",
@@ -27,8 +23,21 @@ export const IdentityRegistryABI = [
   {
     type: "function",
     name: "identityOf",
-    inputs: [{ name: "", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "tokenId", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "identities",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [
+      { name: "didDocumentCID", type: "string" },
+      { name: "docHash", type: "bytes32" },
+      { name: "issuedBy", type: "address" },
+      { name: "issuedAt", type: "uint256" },
+      { name: "revoked", type: "bool" },
+    ],
     stateMutability: "view",
   },
   {
@@ -48,11 +57,58 @@ export const IdentityRegistryABI = [
     outputs: [],
     stateMutability: "nonpayable",
   },
+  {
+    type: "function",
+    name: "MANAGER_ROLE",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "AUDITOR_ROLE",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "DEFAULT_ADMIN_ROLE",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "hasRole",
+    inputs: [
+      { name: "role", type: "bytes32" },
+      { name: "account", type: "address" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "event",
+    name: "IdentityIssued",
+    inputs: [
+      { name: "tokenId", type: "uint256", indexed: true },
+      { name: "owner", type: "address", indexed: true },
+      { name: "cid", type: "string", indexed: false },
+      { name: "docHash", type: "bytes32", indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "IdentityRevoked",
+    inputs: [
+      { name: "tokenId", type: "uint256", indexed: true },
+      { name: "by", type: "address", indexed: true },
+    ],
+    anonymous: false,
+  },
 ];
-
-// ==========================================
-// ASSET NFT ABI
-// ==========================================
 
 export const AssetNFTABI = [
   {
@@ -82,7 +138,7 @@ export const AssetNFTABI = [
   {
     type: "function",
     name: "assets",
-    inputs: [{ name: "", type: "uint256" }],
+    inputs: [{ name: "tokenId", type: "uint256" }],
     outputs: [
       { name: "metadataCID", type: "string" },
       { name: "mintedAt", type: "uint256" },
@@ -96,12 +152,79 @@ export const AssetNFTABI = [
     outputs: [{ name: "", type: "address" }],
     stateMutability: "view",
   },
+  {
+    type: "function",
+    name: "MANAGER_ROLE",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "AUDITOR_ROLE",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "DEFAULT_ADMIN_ROLE",
+    inputs: [],
+    outputs: [{ name: "", type: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "hasRole",
+    inputs: [
+      { name: "role", type: "bytes32" },
+      { name: "account", type: "address" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "transferFrom",
+    inputs: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "tokenId", type: "uint256" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "event",
+    name: "AssetMinted",
+    inputs: [
+      { name: "tokenId", type: "uint256", indexed: true },
+      { name: "owner", type: "address", indexed: true },
+      { name: "cid", type: "string", indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "AssetTransferred",
+    inputs: [
+      { name: "tokenId", type: "uint256", indexed: true },
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "Transfer",
+    inputs: [
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+      { name: "tokenId", type: "uint256", indexed: true },
+    ],
+    anonymous: false,
+  },
 ];
-
-// ==========================================
-// ACCESS CONTROL ABI — shared by IdentityRegistry & AssetNFT
-// (includes the role-constant getters, which are what was missing before)
-// ==========================================
 
 export const AccessControlABI = [
   {
@@ -178,10 +301,6 @@ export const AccessControlABI = [
   },
 ];
 
-// ==========================================
-// MULTISIG ADMIN ABI
-// ==========================================
-
 export const MultiSigAdminABI = [
   {
     type: "function",
@@ -247,11 +366,38 @@ export const MultiSigAdminABI = [
     outputs: [{ name: "", type: "bool" }],
     stateMutability: "view",
   },
+  {
+    type: "event",
+    name: "Proposed",
+    inputs: [
+      { name: "proposalId", type: "uint256", indexed: true },
+      { name: "proposer", type: "address", indexed: true },
+      { name: "actionType", type: "uint8", indexed: false },
+      { name: "target", type: "address", indexed: false },
+      { name: "account", type: "address", indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "Confirmed",
+    inputs: [
+      { name: "proposalId", type: "uint256", indexed: true },
+      { name: "confirmer", type: "address", indexed: true },
+      { name: "confirmations", type: "uint256", indexed: false },
+    ],
+    anonymous: false,
+  },
+  {
+    type: "event",
+    name: "Executed",
+    inputs: [
+      { name: "proposalId", type: "uint256", indexed: true },
+      { name: "actionType", type: "uint8", indexed: false },
+    ],
+    anonymous: false,
+  },
 ];
-
-// ==========================================
-// CONTRACT INSTANCE FACTORY
-// ==========================================
 
 const ABIS_BY_NAME = {
   IdentityRegistry: [...IdentityRegistryABI, ...AccessControlABI],
@@ -262,7 +408,7 @@ const ABIS_BY_NAME = {
 export const getContract = (name, signerOrProvider) => {
   const address = CONTRACT_ADDRESSES[name];
   if (!address) {
-    throw new Error(`No deployed address found for ${name}. Did you run the deploy script?`);
+    throw new Error(`No deployed address found for ${name}.`);
   }
   const abi = ABIS_BY_NAME[name];
   if (!abi) {
